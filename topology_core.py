@@ -120,23 +120,44 @@ def call_ollama(prompt: str, url: str, model: str, timeout: int) -> str:
     resp = requests.post(
         f"{url.rstrip('/')}/api/generate",
         json={"model": model, "prompt": prompt, "stream": False},
-        timeout=timeout,
+        timeout=(CONNECT_TIMEOUT_SECONDS, timeout),
     )
     resp.raise_for_status()
     return resp.json().get("response", "")
 
 
+CONNECT_TIMEOUT_SECONDS = 10
+"""Wie lange auf den TCP-Connect zu einem Ollama-Server gewartet wird,
+getrennt vom (viel größeren) request_timeout für die eigentliche
+Generierung. Ohne das hängt ein Server, der Pakete nur verwirft statt die
+Verbindung aktiv abzulehnen, den kompletten request_timeout lang - und das
+bei jedem Retry erneut, da ollama_servers[0] sonst immer wieder als
+Erstes probiert wird."""
+
+
 def call_ollama_with_failover(
-    prompt: str, servers: list[dict], timeout: int
+    prompt: str, servers: list[dict], timeout: int, skip: set[str] | None = None
 ) -> tuple[str, str]:
     """
     Probiert die konfigurierten Ollama-Server der Reihe nach durch, bis
     einer erfolgreich antwortet. Gibt (roher_text, servername) zurück.
     Wirft RuntimeError, falls ALLE Server fehlschlagen.
+
+    `skip` (vom Aufrufer über mehrere Versuche hinweg wiederverwendet)
+    markiert Server, die in einem früheren Versuch bereits fehlgeschlagen
+    sind, damit sie nicht bei jedem Retry erneut angefragt werden.
     """
     last_error: Optional[Exception] = None
+    skip = skip if skip is not None else set()
+    candidates = [s for s in servers if s["name"] not in skip]
 
-    for server in servers:
+    if not candidates:
+        raise RuntimeError(
+            f"Alle {len(servers)} konfigurierten Ollama-Server sind bereits "
+            f"in einem früheren Versuch als nicht erreichbar markiert worden."
+        )
+
+    for server in candidates:
         name = server["name"]
         url = server["url"]
         model = server["model"]
@@ -148,6 +169,7 @@ def call_ollama_with_failover(
         except requests.RequestException as e:
             log.warning("Server '%s' nicht erreichbar/Fehler: %s", name, e)
             last_error = e
+            skip.add(name)
             continue
 
     raise RuntimeError(
@@ -300,12 +322,13 @@ def generate_topology(user_request: str, config: dict) -> dict:
     warnings: list[str] = []
     raw_response = ""
     used_server: Optional[str] = None
+    dead_servers: set[str] = set()
 
     for attempt in range(1, max_retries + 1):
         log.info("Generierungsversuch %d/%d ...", attempt, max_retries)
         try:
             raw_response, used_server = call_ollama_with_failover(
-                prompt, servers, request_timeout
+                prompt, servers, request_timeout, skip=dead_servers
             )
         except RuntimeError as e:
             log.error(str(e))
