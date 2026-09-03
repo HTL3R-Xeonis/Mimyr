@@ -1,0 +1,27 @@
+nodes:
+  - image: VPC
+    role: PC
+    names:
+      - PC1
+      - PC2
+      - PC3
+  - image: Ubuntu 22.04.4 Live Server
+    role: VM
+    names:
+      - PC4
+  - image: Cisco IOSvL2 15.2(20200924:215240)
+    role: SWITCH
+    names:
+      - SW-C1
+  - image: Cisco IOSv 15.7(3)M3
+    role: ROUTER
+    names:
+      - POP-ISP1-1
+  - image: Cisco IOSv 15.7(3)M3
+    role: FW
+    names:
+      - FW-C1-1
+edges:
+  - [ PC1, gi0/0, SW-C1, gi0/2 ]
+  - [ FW-C1-1, gi0/0, SW-C1, gi0/0 ]
+  - [ FW-C1-1, gi0/1, POP-ISP1-1, gi0/1 ]

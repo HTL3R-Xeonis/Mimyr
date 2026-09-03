@@ -1,0 +1,40 @@
+# Konfiguration für den Topology-Generator
+# Nach Änderungen: Container neu starten, oder POST /api/reload-config
+# aufrufen, falls die API bereits läuft.
+
+gns3_api_url: http://10.20.20.171:8001
+template_api_url: http://10.20.20.171:8000
+
+# Mehrere Ollama-Server möglich. Werden der Reihe nach probiert -
+# sobald einer erfolgreich antwortet, wird dessen Ergebnis verwendet.
+# als Fallback, falls ein Server down ist oder überlastet.
+ollama_servers:
+  - name: ollama-1
+    url: http://10.20.20.81:11434
+    model: granite4.1:8b
+
+  - name: ollama-2
+    url: http://10.20.20.85:11434
+    model: granite4.1:8b
+
+  # Weiteren Server ergänzen:
+  # - name: ollama-3
+  #   url: http://10.20.20.82:11434
+  #   model: llama3.1:8b
+
+# Wie oft neu versucht wird, falls die LLM kein gültiges/valides YAML
+# liefert (z.B. falsches Format, unbekanntes Image, kaputtes YAML).
+# Bei jedem Versuch wird wieder bei ollama_servers[0] begonnen.
+max_retries: 3
+
+# Timeout für eine einzelne Ollama-Generierungsanfrage (Sekunden).
+# sollte aufgrund der Limitierten Hardware sehr großzügig sein
+request_timeout: 500
+
+# Timeout für interne API-Abfragen (GNS3-Template-API, NFS-Template-API)
+api_timeout: 15
+
+# Pfade relativ zu diesem Config-Verzeichnis
+prompt_template_file: prompt_template.txt
+example_topology_file: example_topology.yml
+

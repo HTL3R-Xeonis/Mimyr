@@ -1,0 +1,14 @@
+services:
+  topology-generator:
+    build:
+      context: .
+      dockerfile: topology.Dockerfile
+    container_name: topology-generator
+    restart: unless-stopped
+    ports:
+      - "8002:8000"
+    volumes:
+      # Enthält topology_config.yml, prompt_template.txt, example_topology.yml
+      - ./config:/config:ro
+    environment:
+      - CONFIG_PATH=/config/topology_config.yml
