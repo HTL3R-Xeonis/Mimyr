@@ -1,10 +1,10 @@
 """
-Kernlogik für die Topologie-Generierung per Ollama LLM.
-Komplett config-getrieben: Prompt-Template, Beispiel-Format, Ollama-Server-
-Liste, Retry-Anzahl etc. kommen aus externen Dateien statt aus dem Code.
+Core logic for topology generation via an Ollama LLM.
+Fully config-driven: prompt template, example format, Ollama server list,
+retry count etc. all come from external files instead of the code.
 
-Wird sowohl vom API-Endpoint (topology_api.py) als auch vom
-CLI-Script (generate_topology_cli.py) genutzt.
+Used by both the API endpoint (topology_api.py) and the CLI script
+(generate_topology_cli.py).
 """
 
 from __future__ import annotations
@@ -20,15 +20,15 @@ import yaml
 log = logging.getLogger("topology_core")
 
 
-# ---------- Config laden ----------
+# ---------- Load config ----------
 def load_config(config_path: str) -> dict:
     """
-    Lädt die Haupt-Config sowie die darin referenzierten Prompt- und
-    Beispiel-Dateien (Pfade werden relativ zum Config-Verzeichnis aufgelöst).
+    Loads the main config plus the prompt and example files it references
+    (paths are resolved relative to the config file's own directory).
     """
     path = Path(config_path)
     if not path.exists():
-        raise FileNotFoundError(f"Config-Datei nicht gefunden: {path}")
+        raise FileNotFoundError(f"Config file not found: {path}")
 
     with open(path, "r", encoding="utf-8") as f:
         config = yaml.safe_load(f) or {}
@@ -38,13 +38,13 @@ def load_config(config_path: str) -> dict:
     prompt_template_file = config.get("prompt_template_file", "prompt_template.txt")
     prompt_path = base_dir / prompt_template_file
     if not prompt_path.exists():
-        raise FileNotFoundError(f"Prompt-Template-Datei nicht gefunden: {prompt_path}")
+        raise FileNotFoundError(f"Prompt template file not found: {prompt_path}")
     config["prompt_template"] = prompt_path.read_text(encoding="utf-8")
 
     example_file = config.get("example_topology_file", "example_topology.yml")
     example_path = base_dir / example_file
     if not example_path.exists():
-        raise FileNotFoundError(f"Beispiel-Topologie-Datei nicht gefunden: {example_path}")
+        raise FileNotFoundError(f"Example topology file not found: {example_path}")
     config["example_topology"] = example_path.read_text(encoding="utf-8")
 
     config.setdefault("ollama_servers", [])
@@ -53,23 +53,21 @@ def load_config(config_path: str) -> dict:
     config.setdefault("api_timeout", 15)
 
     if not config["ollama_servers"]:
-        raise ValueError("Config enthält keine 'ollama_servers'.")
+        raise ValueError("Config contains no 'ollama_servers'.")
     if not config.get("gns3_api_url"):
-        raise ValueError("Config: 'gns3_api_url' fehlt.")
+        raise ValueError("Config: 'gns3_api_url' is missing.")
 
     for i, server in enumerate(config["ollama_servers"]):
         if "url" not in server or "model" not in server:
-            raise ValueError(
-                f"ollama_servers[{i}] braucht mindestens 'url' und 'model'."
-            )
+            raise ValueError(f"ollama_servers[{i}] needs at least 'url' and 'model'.")
         server.setdefault("name", server["url"])
 
     return config
 
 
-# ---------- Geräte-Quellen abrufen ----------
+# ---------- Fetch device sources ----------
 def fetch_available_devices(gns3_api_url: str, timeout: int) -> list[dict]:
-    """Holt die aktuell verfügbaren GNS3-Templates von der GNS3-Template-API."""
+    """Fetches the currently available GNS3 templates from the GNS3 Template API."""
     url = f"{gns3_api_url.rstrip('/')}/api/templates"
     resp = requests.get(url, timeout=timeout)
     resp.raise_for_status()
@@ -78,7 +76,7 @@ def fetch_available_devices(gns3_api_url: str, timeout: int) -> list[dict]:
 
 
 def fetch_nfs_templates(template_api_url: str, timeout: int) -> list[dict]:
-    """Holt die Liste der VM-Templates (.ova-Dateien) von der NFS-Template-API."""
+    """Fetches the list of VM templates (.ova files) from the NFS Template API."""
     if not template_api_url:
         return []
     url = f"{template_api_url.rstrip('/')}/api/templates"
@@ -88,15 +86,15 @@ def fetch_nfs_templates(template_api_url: str, timeout: int) -> list[dict]:
         data = resp.json()
         return data.get("templates", [])
     except requests.RequestException as e:
-        log.warning("Konnte NFS-Template-API nicht abfragen (%s): %s", url, e)
+        log.warning("Could not query NFS Template API (%s): %s", url, e)
         return []
 
 
-# ---------- Prompt bauen ----------
+# ---------- Build prompt ----------
 def build_device_list_text(devices: list[dict]) -> str:
     names = sorted({d.get("name") for d in devices if d.get("name")})
     if not names:
-        return "  (keine Geräte gefunden)"
+        return "  (no devices found)"
     return "\n".join(f"  - {name}" for name in names)
 
 
@@ -115,7 +113,7 @@ def build_prompt(
     )
 
 
-# ---------- Ollama mit Failover ----------
+# ---------- Ollama with failover ----------
 def call_ollama(prompt: str, url: str, model: str, timeout: int) -> str:
     resp = requests.post(
         f"{url.rstrip('/')}/api/generate",
@@ -127,25 +125,24 @@ def call_ollama(prompt: str, url: str, model: str, timeout: int) -> str:
 
 
 CONNECT_TIMEOUT_SECONDS = 10
-"""Wie lange auf den TCP-Connect zu einem Ollama-Server gewartet wird,
-getrennt vom (viel größeren) request_timeout für die eigentliche
-Generierung. Ohne das hängt ein Server, der Pakete nur verwirft statt die
-Verbindung aktiv abzulehnen, den kompletten request_timeout lang - und das
-bei jedem Retry erneut, da ollama_servers[0] sonst immer wieder als
-Erstes probiert wird."""
+"""How long to wait for the TCP connect to an Ollama server, kept separate
+from the (much larger) request_timeout for the actual generation. Without
+this, a server that only drops packets instead of actively refusing the
+connection would block for the full request_timeout - and do so again on
+every retry, since ollama_servers[0] is otherwise always tried first."""
 
 
 def call_ollama_with_failover(
     prompt: str, servers: list[dict], timeout: int, skip: set[str] | None = None
 ) -> tuple[str, str]:
     """
-    Probiert die konfigurierten Ollama-Server der Reihe nach durch, bis
-    einer erfolgreich antwortet. Gibt (roher_text, servername) zurück.
-    Wirft RuntimeError, falls ALLE Server fehlschlagen.
+    Tries the configured Ollama servers in order until one responds
+    successfully. Returns (raw_text, server_name). Raises RuntimeError if
+    ALL servers fail.
 
-    `skip` (vom Aufrufer über mehrere Versuche hinweg wiederverwendet)
-    markiert Server, die in einem früheren Versuch bereits fehlgeschlagen
-    sind, damit sie nicht bei jedem Retry erneut angefragt werden.
+    `skip` (reused by the caller across multiple attempts) marks servers
+    that already failed in an earlier attempt, so they aren't queried
+    again on every retry.
     """
     last_error: Optional[Exception] = None
     skip = skip if skip is not None else set()
@@ -153,35 +150,35 @@ def call_ollama_with_failover(
 
     if not candidates:
         raise RuntimeError(
-            f"Alle {len(servers)} konfigurierten Ollama-Server sind bereits "
-            f"in einem früheren Versuch als nicht erreichbar markiert worden."
+            f"All {len(servers)} configured Ollama servers were already "
+            f"marked unreachable in an earlier attempt."
         )
 
     for server in candidates:
         name = server["name"]
         url = server["url"]
         model = server["model"]
-        log.info("Versuche Ollama-Server '%s' (%s, model=%s) ...", name, url, model)
+        log.info("Trying Ollama server '%s' (%s, model=%s) ...", name, url, model)
         try:
             response = call_ollama(prompt, url, model, timeout)
-            log.info("Antwort von '%s' erhalten.", name)
+            log.info("Got a response from '%s'.", name)
             return response, name
         except requests.RequestException as e:
-            log.warning("Server '%s' nicht erreichbar/Fehler: %s", name, e)
+            log.warning("Server '%s' unreachable/error: %s", name, e)
             last_error = e
             skip.add(name)
             continue
 
     raise RuntimeError(
-        f"Alle {len(servers)} konfigurierten Ollama-Server nicht erreichbar. "
-        f"Letzter Fehler: {last_error}"
+        f"All {len(servers)} configured Ollama servers are unreachable. "
+        f"Last error: {last_error}"
     )
 
 
-# ---------- Ausgabe bereinigen & validieren ----------
+# ---------- Clean up & validate output ----------
 def strip_code_fences(text: str) -> str:
-    """Entfernt ```yaml ... ``` Umrandungen sowie vom Modell hinzugefügte
-    Marker-/Trennzeilen (z.B. '--- START ---' oder '=== ENDE ===')."""
+    """Strips ```yaml ... ``` fences as well as separator/marker lines the
+    model added on its own (e.g. '--- START ---' or '=== END ===')."""
     text = text.strip()
 
     match = re.match(r"^```(?:yaml)?\s*\n(.*?)\n```$", text, re.DOTALL)
@@ -214,10 +211,10 @@ def validate_topology(
     yaml_text: str, gns3_devices: list[dict], vm_templates: list[dict]
 ) -> tuple[Optional[dict], list[str]]:
     """
-    Prüft die generierte YAML auf Gültigkeit und ob alle 'image'-Werte zur
-    jeweils passenden Quelle passen:
-      - role VM             -> muss in vm_templates (NFS-Share) vorkommen
-      - alle anderen Rollen -> muss in gns3_devices (GNS3-Templates) vorkommen
+    Checks the generated YAML for validity and whether every 'image' value
+    matches its expected source:
+      - role VM     -> must appear in vm_templates (NFS share)
+      - every other role -> must appear in gns3_devices (GNS3 templates)
     """
     warnings: list[str] = []
     gns3_names = {d.get("name") for d in gns3_devices if d.get("name")}
@@ -228,16 +225,16 @@ def validate_topology(
     try:
         parsed = yaml.safe_load(cleaned)
     except yaml.YAMLError as e:
-        return None, [f"Ausgabe ist kein gültiges YAML: {e}"]
+        return None, [f"Output is not valid YAML: {e}"]
 
     if not isinstance(parsed, dict) or "nodes" not in parsed:
-        return parsed, ["Ausgabe enthält keinen 'nodes'-Schlüssel."]
+        return parsed, ["Output has no 'nodes' key."]
 
     node_names: set[str] = set()
 
     for node in parsed.get("nodes", []):
         if not isinstance(node, dict):
-            warnings.append(f"Ungültiger Node-Eintrag: {node!r}")
+            warnings.append(f"Invalid node entry: {node!r}")
             continue
 
         image = node.get("image")
@@ -246,14 +243,14 @@ def validate_topology(
         if role == "VM":
             if image not in vm_names:
                 warnings.append(
-                    f"Image '{image}' (role=VM) ist nicht in der Liste der "
-                    f"verfügbaren VM-Images auf dem NFS-Share vorhanden."
+                    f"Image '{image}' (role=VM) is not in the list of "
+                    f"available VM images on the NFS share."
                 )
         else:
             if image not in gns3_names:
                 warnings.append(
-                    f"Image '{image}' (role={role}) ist nicht in der Liste "
-                    f"der verfügbaren GNS3-Templates vorhanden."
+                    f"Image '{image}' (role={role}) is not in the list "
+                    f"of available GNS3 templates."
                 )
 
         for n in node.get("names") or []:
@@ -261,30 +258,30 @@ def validate_topology(
 
     for edge in parsed.get("edges", []):
         if not isinstance(edge, list) or len(edge) != 4:
-            warnings.append(f"Ungültiger Edge-Eintrag: {edge!r}")
+            warnings.append(f"Invalid edge entry: {edge!r}")
             continue
         device_a, _, device_b, _ = edge
         if device_a not in node_names:
-            warnings.append(f"Edge referenziert unbekanntes Gerät: '{device_a}'")
+            warnings.append(f"Edge references unknown device: '{device_a}'")
         if device_b not in node_names:
-            warnings.append(f"Edge referenziert unbekanntes Gerät: '{device_b}'")
+            warnings.append(f"Edge references unknown device: '{device_b}'")
 
     return parsed, warnings
 
 
-# ---------- Hauptablauf ----------
+# ---------- Main flow ----------
 def generate_topology(user_request: str, config: dict) -> dict:
     """
-    Führt den kompletten Ablauf aus (inkl. Retries bei ungültiger Ausgabe
-    und Failover zwischen mehreren Ollama-Servern) und gibt zurück:
+    Runs the full flow (including retries on invalid output and failover
+    across multiple Ollama servers) and returns:
     {
-        "yaml": <roher YAML-Text des letzten Versuchs>,
-        "parsed": <geparste Struktur oder None>,
+        "yaml": <raw YAML text of the last attempt>,
+        "parsed": <parsed structure or None>,
         "warnings": [...],
         "valid": bool,
-        "devices_considered": <Anzahl GNS3-Geräte>,
-        "vm_templates_considered": <Anzahl NFS-VM-Images>,
-        "ollama_server_used": <Name des Servers, der zuletzt geantwortet hat>,
+        "devices_considered": <number of GNS3 devices>,
+        "vm_templates_considered": <number of NFS VM images>,
+        "ollama_server_used": <name of the server that last responded>,
         "attempts": [{"attempt": 1, "server": "...", "warnings": [...]}, ...],
     }
     """
@@ -295,19 +292,17 @@ def generate_topology(user_request: str, config: dict) -> dict:
     request_timeout = config.get("request_timeout", 300)
     api_timeout = config.get("api_timeout", 15)
 
-    log.info("Hole verfügbare GNS3-Geräte von %s ...", gns3_api_url)
+    log.info("Fetching available GNS3 devices from %s ...", gns3_api_url)
     gns3_devices = fetch_available_devices(gns3_api_url, api_timeout)
-    log.info("%d GNS3-Geräte gefunden.", len(gns3_devices))
+    log.info("Found %d GNS3 device(s).", len(gns3_devices))
 
     vm_templates: list[dict] = []
     if template_api_url:
-        log.info("Hole verfügbare VM-Templates von %s ...", template_api_url)
+        log.info("Fetching available VM templates from %s ...", template_api_url)
         vm_templates = fetch_nfs_templates(template_api_url, api_timeout)
-        log.info("%d VM-Template(s) gefunden.", len(vm_templates))
+        log.info("Found %d VM template(s).", len(vm_templates))
     else:
-        log.warning(
-            "Keine template_api_url konfiguriert - role 'VM' hat keine Bildquelle."
-        )
+        log.warning("No template_api_url configured - role 'VM' has no image source.")
 
     prompt = build_prompt(
         user_request,
@@ -325,7 +320,7 @@ def generate_topology(user_request: str, config: dict) -> dict:
     dead_servers: set[str] = set()
 
     for attempt in range(1, max_retries + 1):
-        log.info("Generierungsversuch %d/%d ...", attempt, max_retries)
+        log.info("Generation attempt %d/%d ...", attempt, max_retries)
         try:
             raw_response, used_server = call_ollama_with_failover(
                 prompt, servers, request_timeout, skip=dead_servers
@@ -342,11 +337,11 @@ def generate_topology(user_request: str, config: dict) -> dict:
         )
 
         if parsed is not None and not warnings:
-            log.info("Versuch %d erfolgreich, gültige Topologie erhalten.", attempt)
+            log.info("Attempt %d succeeded, got a valid topology.", attempt)
             break
 
         log.warning(
-            "Versuch %d/%d lieferte kein gültiges Ergebnis (%d Warnung(en)).",
+            "Attempt %d/%d did not produce a valid result (%d warning(s)).",
             attempt,
             max_retries,
             len(warnings),

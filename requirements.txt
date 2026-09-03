@@ -3,4 +3,3 @@ uvicorn[standard]
 pyyaml
 requests
 pydantic
- 

@@ -23,14 +23,14 @@ CONFIG_ERROR: str | None = None
 try:
     CONFIG = load_config(CONFIG_PATH)
     log.info(
-        "Config geladen von %s (%d Ollama-Server, max_retries=%d)",
+        "Config loaded from %s (%d Ollama server(s), max_retries=%d)",
         CONFIG_PATH,
         len(CONFIG["ollama_servers"]),
         CONFIG["max_retries"],
     )
 except Exception as e:
     CONFIG_ERROR = str(e)
-    log.error("Konnte Config nicht laden: %s", e)
+    log.error("Could not load config: %s", e)
 
 
 class TopologyRequest(BaseModel):
@@ -49,9 +49,9 @@ def root():
 
 @app.get("/api/config")
 def get_config():
-    """Zeigt die aktuell geladene Config (ohne Prompt-/Beispiel-Volltext)."""
+    """Shows the currently loaded config (without the full prompt/example text)."""
     if CONFIG is None:
-        raise HTTPException(500, f"Config nicht geladen: {CONFIG_ERROR}")
+        raise HTTPException(500, f"Config not loaded: {CONFIG_ERROR}")
 
     return {
         "gns3_api_url": CONFIG["gns3_api_url"],
@@ -67,14 +67,14 @@ def get_config():
 
 @app.post("/api/reload-config")
 def reload_config():
-    """Lädt die Config-Dateien neu, ohne den Container neu starten zu müssen."""
+    """Reloads the config files without needing to restart the container."""
     global CONFIG, CONFIG_ERROR
     try:
         CONFIG = load_config(CONFIG_PATH)
         CONFIG_ERROR = None
     except Exception as e:
         CONFIG_ERROR = str(e)
-        raise HTTPException(500, f"Konnte Config nicht neu laden: {e}")
+        raise HTTPException(500, f"Could not reload config: {e}")
 
     return {
         "status": "ok",
@@ -85,17 +85,15 @@ def reload_config():
 @app.post("/api/generate-topology")
 def generate(request: TopologyRequest):
     if CONFIG is None:
-        raise HTTPException(
-            500, f"Config konnte nicht geladen werden: {CONFIG_ERROR}"
-        )
+        raise HTTPException(500, f"Could not load config: {CONFIG_ERROR}")
 
     if not request.prompt.strip():
-        raise HTTPException(400, "Feld 'prompt' darf nicht leer sein.")
+        raise HTTPException(400, "Field 'prompt' must not be empty.")
 
     try:
         result = generate_topology(request.prompt, CONFIG)
     except Exception as e:
-        log.exception("Fehler bei der Topologie-Generierung")
-        raise HTTPException(502, f"Fehler bei der Generierung: {e}")
+        log.exception("Error during topology generation")
+        raise HTTPException(502, f"Error during generation: {e}")
 
     return result

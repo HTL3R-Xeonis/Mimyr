@@ -1,13 +1,13 @@
-# Konfiguration für den Topology-Generator
-# Nach Änderungen: Container neu starten, oder POST /api/reload-config
-# aufrufen, falls die API bereits läuft.
+# Config for the Topology Generator.
+# After making changes: restart the container, or call
+# POST /api/reload-config if the API is already running.
 
 gns3_api_url: http://10.20.20.171:8001
 template_api_url: http://10.20.20.171:8000
 
-# Mehrere Ollama-Server möglich. Werden der Reihe nach probiert -
-# sobald einer erfolgreich antwortet, wird dessen Ergebnis verwendet.
-# als Fallback, falls ein Server down ist oder überlastet.
+# Multiple Ollama servers are supported. They are tried in order - as
+# soon as one responds successfully, its result is used. Acts as a
+# fallback in case a server is down or overloaded.
 ollama_servers:
   - name: ollama-1
     url: http://10.20.20.81:11434
@@ -17,24 +17,24 @@ ollama_servers:
     url: http://10.20.20.85:11434
     model: granite4.1:8b
 
-  # Weiteren Server ergänzen:
+  # Add another server:
   # - name: ollama-3
   #   url: http://10.20.20.82:11434
   #   model: llama3.1:8b
 
-# Wie oft neu versucht wird, falls die LLM kein gültiges/valides YAML
-# liefert (z.B. falsches Format, unbekanntes Image, kaputtes YAML).
-# Bei jedem Versuch wird wieder bei ollama_servers[0] begonnen.
+# How many times to retry if the LLM doesn't produce valid output (e.g.
+# wrong format, unknown image, broken YAML). Each attempt starts again
+# at ollama_servers[0], except for servers already marked unreachable in
+# an earlier attempt of the same request.
 max_retries: 3
 
-# Timeout für eine einzelne Ollama-Generierungsanfrage (Sekunden).
-# sollte aufgrund der Limitierten Hardware sehr großzügig sein
+# Timeout for a single Ollama generation request (seconds). Should be
+# generous given the limited hardware.
 request_timeout: 500
 
-# Timeout für interne API-Abfragen (GNS3-Template-API, NFS-Template-API)
+# Timeout for internal API calls (GNS3 Template API, NFS Template API).
 api_timeout: 15
 
-# Pfade relativ zu diesem Config-Verzeichnis
+# Paths relative to this config directory.
 prompt_template_file: prompt_template.txt
 example_topology_file: example_topology.yml
-

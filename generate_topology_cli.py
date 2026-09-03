@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-CLI zum manuellen Generieren einer Topologie-Config per Ollama LLM.
+CLI for manually generating a topology config via an Ollama LLM.
 
-Beispiel:
+Example:
     ./venv/bin/python generate_topology_cli.py \\
         --config topology_config.yml \\
-        --prompt "Baue eine kleine Topologie mit 2 PCs hinter einem Switch" \\
+        --prompt "Build a small topology with 2 PCs behind a switch" \\
         --output topology.yml
 """
 
@@ -26,13 +26,13 @@ log = logging.getLogger("generate_topology_cli")
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Generiert eine GNS3-Topologie-Config per Ollama LLM."
+        description="Generates a GNS3 topology config via an Ollama LLM."
     )
-    parser.add_argument("--prompt", required=True, help="Beschreibung der gewünschten Topologie")
+    parser.add_argument("--prompt", required=True, help="Description of the desired topology")
     parser.add_argument(
-        "--config", default="topology_config.yml", help="Pfad zur Config-Datei"
+        "--config", default="topology_config.yml", help="Path to the config file"
     )
-    parser.add_argument("--output", help="Pfad, unter dem die YAML gespeichert werden soll")
+    parser.add_argument("--output", help="Path to save the generated YAML to")
     return parser.parse_args()
 
 
@@ -43,30 +43,30 @@ def main() -> int:
     result = generate_topology(args.prompt, config)
 
     print("\n" + "=" * 60)
-    print("Generierte Topologie:")
+    print("Generated topology:")
     print("=" * 60)
     print(result["yaml"])
     print("=" * 60)
 
-    print(f"\nVerwendeter Ollama-Server: {result['ollama_server_used']}")
-    print(f"Benötigte Versuche: {len(result['attempts'])}")
+    print(f"\nOllama server used: {result['ollama_server_used']}")
+    print(f"Attempts needed: {len(result['attempts'])}")
 
     if result["warnings"]:
-        print(f"\n{len(result['warnings'])} Warnung(en):")
+        print(f"\n{len(result['warnings'])} warning(s):")
         for w in result["warnings"]:
             print(f"  - {w}")
     else:
-        print("\nKeine Validierungswarnungen. Alle Images sind verfügbar.")
+        print("\nNo validation warnings. All images are available.")
 
     print(
-        f"\nBerücksichtigt: {result['devices_considered']} GNS3-Templates, "
-        f"{result['vm_templates_considered']} VM-Images vom NFS-Share."
+        f"\nConsidered: {result['devices_considered']} GNS3 templates, "
+        f"{result['vm_templates_considered']} VM images from the NFS share."
     )
 
     if args.output:
         output_path = Path(args.output)
         output_path.write_text(result["yaml"], encoding="utf-8")
-        print(f"\nGespeichert nach: {output_path}")
+        print(f"\nSaved to: {output_path}")
 
     return 0 if result["valid"] else 1
 

@@ -8,7 +8,7 @@ services:
     ports:
       - "8002:8000"
     volumes:
-      # Enthält topology_config.yml, prompt_template.txt, example_topology.yml
+      # Contains topology_config.yml, prompt_template.txt, example_topology.yml
       - ./config:/config:ro
     environment:
       - CONFIG_PATH=/config/topology_config.yml
