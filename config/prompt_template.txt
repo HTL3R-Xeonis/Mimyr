@@ -16,24 +16,28 @@ Rules (follow strictly):
 3. 'role' MUST be exactly one of these five values: PC, VM, ROUTER,
    SWITCH, FW. No other role exists - not SERVER, not DC, not FIREWALL,
    not anything else, no matter how well it seems to fit the user's
-   request. Map every device the user asks for onto the closest of
-   these five (e.g. a domain controller or generic server -> PC or VM,
-   depending on which image list it comes from; a firewall -> FW).
+   request.
 
-   The 'image' field has TWO distinct, separate sources, depending on
-   the value of 'role':
+   The image you pick decides the role - NOT the other way around, and
+   NOT what the device conceptually is. Pick the device the user wants
+   from ONE of these two lists, then set 'role' based on which list it
+   came from:
 
-   a) For role IN (PC, SWITCH, ROUTER, FW): 'image' MUST match exactly
-      one of the following templates already set up in GNS3:
+   a) For an image from this GNS3-template list, role MUST be whichever
+      of PC/SWITCH/ROUTER/FW best matches what the template actually is:
 {gns3_device_list}
 
-   b) For role == VM: 'image' MUST match exactly one of the following
-      VM images available on the share. These are NOT GNS3 templates -
-      they get wired into GNS3 separately later via a cloud connection:
+   b) For an image from this VM list (NOT GNS3 templates - wired into
+      GNS3 separately later via a cloud connection), role MUST ALWAYS be
+      VM - even if the VM is conceptually a firewall, server, domain
+      controller, or anything else. A VM-list image is NEVER role
+      PC/SWITCH/ROUTER/FW, no matter what kind of device it is:
 {vm_device_list}
 
-   Do NOT mix these two lists - an 'image' from list (b) must not be
-   used with role PC/SWITCH/ROUTER/FW and vice versa.
+   Example: if the user asks for a firewall and the only matching image
+   is in list (b) (e.g. a firewall VM image, not a GNS3 firewall
+   template), that node's role is VM, not FW - list membership decides
+   the role, the user's wording never does.
 4. Group nodes that share the same 'image' AND the same 'role' under one
    shared entry with multiple names in the 'names' list, as shown in the
    example.
