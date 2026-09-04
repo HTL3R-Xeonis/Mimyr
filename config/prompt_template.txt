@@ -13,7 +13,14 @@ Rules (follow strictly):
 2. Do NOT add your own separator or marker lines (e.g. no lines like
    '---', '=== ... ===' or '--- START ---'). Your response starts
    directly with the line 'nodes:' and ends with the last 'edges' line.
-3. The 'image' field has TWO distinct, separate sources, depending on
+3. 'role' MUST be exactly one of these five values: PC, VM, ROUTER,
+   SWITCH, FW. No other role exists - not SERVER, not DC, not FIREWALL,
+   not anything else, no matter how well it seems to fit the user's
+   request. Map every device the user asks for onto the closest of
+   these five (e.g. a domain controller or generic server -> PC or VM,
+   depending on which image list it comes from; a firewall -> FW).
+
+   The 'image' field has TWO distinct, separate sources, depending on
    the value of 'role':
 
    a) For role IN (PC, SWITCH, ROUTER, FW): 'image' MUST match exactly
@@ -41,6 +48,12 @@ Rules (follow strictly):
    Before finishing, check that no device's interface name repeats
    across your edges - if one does, renumber it to the next free
    interface for that device.
+7. Every device name that appears in 'edges' (as DeviceA or DeviceB)
+   MUST also appear in some node group's 'names' list under 'nodes' -
+   an edge can never reference a device you didn't declare. Before
+   finishing, go through every edge and confirm both device names exist
+   under 'nodes' - if one doesn't, either add it as a node or remove/fix
+   the edge.
 
 User's request:
 {user_request}
