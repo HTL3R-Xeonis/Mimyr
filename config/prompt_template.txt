@@ -33,6 +33,14 @@ Rules (follow strictly):
 5. 'edges' connects two devices via their interface names in the format
    [DeviceA, InterfaceA, DeviceB, InterfaceB]. Every device used in
    'edges' must already be defined under 'nodes'.
+6. Every device has a growing set of interfaces: gi0/0, gi0/1, gi0/2,
+   etc. A device may NOT use the same interface name twice across
+   different edges. If a device connects to N other devices, it needs N
+   distinct interface names, starting at gi0/0 and incrementing by 1 for
+   each additional edge it appears in, in the order you list the edges.
+   Before finishing, check that no device's interface name repeats
+   across your edges - if one does, renumber it to the next free
+   interface for that device.
 
 User's request:
 {user_request}
