@@ -209,14 +209,27 @@ def _strip_marker_lines(text: str) -> str:
 
 def validate_topology(
     yaml_text: str, gns3_devices: list[dict], vm_templates: list[dict]
-) -> tuple[Optional[dict], list[str]]:
+) -> tuple[Optional[dict], list[str], bool]:
     """
     Checks the generated YAML for validity and whether every 'image' value
     matches its expected source:
       - role VM     -> must appear in vm_templates (NFS share)
       - every other role -> must appear in gns3_devices (GNS3 templates)
+
+    A node whose image only exists as a VM-list image gets its role
+    force-corrected to VM regardless of what the model output, instead of
+    just being flagged as a warning: TopologyBuilder itself guarantees
+    VM-list and GNS3-list image names never collide (it refuses to run
+    otherwise), so "image is a known VM image" unambiguously means role
+    VM is correct - no need to burn a whole retry over a mistake that has
+    exactly one possible fix. The model has repeatedly mislabeled a
+    firewall/OS VM image (e.g. OPNsense, Windows 11 Pro Education) with a
+    GNS3-only role like FW/PC despite the prompt explicitly saying not to.
+    :return: (parsed structure, warnings, whether any role was
+        auto-corrected)
     """
     warnings: list[str] = []
+    corrected = False
     gns3_names = {d.get("name") for d in gns3_devices if d.get("name")}
     vm_names = {d.get("name") for d in vm_templates if d.get("name")}
 
@@ -225,10 +238,10 @@ def validate_topology(
     try:
         parsed = yaml.safe_load(cleaned)
     except yaml.YAMLError as e:
-        return None, [f"Output is not valid YAML: {e}"]
+        return None, [f"Output is not valid YAML: {e}"], False
 
     if not isinstance(parsed, dict) or "nodes" not in parsed:
-        return parsed, ["Output has no 'nodes' key."]
+        return parsed, ["Output has no 'nodes' key."], False
 
     node_names: set[str] = set()
 
@@ -239,6 +252,17 @@ def validate_topology(
 
         image = node.get("image")
         role = node.get("role")
+
+        if image in vm_names and role != "VM":
+            log.info(
+                "Auto-correcting role for image '%s': %r -> 'VM' (only "
+                "exists as a VM-list image).",
+                image,
+                role,
+            )
+            node["role"] = "VM"
+            role = "VM"
+            corrected = True
 
         if role == "VM":
             if image not in vm_names:
@@ -266,7 +290,7 @@ def validate_topology(
         if device_b not in node_names:
             warnings.append(f"Edge references unknown device: '{device_b}'")
 
-    return parsed, warnings
+    return parsed, warnings, corrected
 
 
 # ---------- Main flow ----------
@@ -315,6 +339,7 @@ def generate_topology(user_request: str, config: dict) -> dict:
     attempts: list[dict] = []
     parsed = None
     warnings: list[str] = []
+    corrected = False
     raw_response = ""
     used_server: Optional[str] = None
     dead_servers: set[str] = set()
@@ -331,7 +356,9 @@ def generate_topology(user_request: str, config: dict) -> dict:
             attempts.append({"attempt": attempt, "server": None, "warnings": warnings})
             break
 
-        parsed, warnings = validate_topology(raw_response, gns3_devices, vm_templates)
+        parsed, warnings, corrected = validate_topology(
+            raw_response, gns3_devices, vm_templates
+        )
         attempts.append(
             {"attempt": attempt, "server": used_server, "warnings": list(warnings)}
         )
@@ -347,11 +374,21 @@ def generate_topology(user_request: str, config: dict) -> dict:
             len(warnings),
         )
 
+    valid = parsed is not None and len(warnings) == 0
+    # If validate_topology auto-corrected a node's role, the raw model
+    # output still has the wrong value - re-serialize the corrected
+    # structure instead of handing back text that doesn't match "parsed".
+    final_yaml = (
+        yaml.safe_dump(parsed, sort_keys=False)
+        if valid and corrected
+        else strip_code_fences(raw_response)
+    )
+
     return {
-        "yaml": strip_code_fences(raw_response),
+        "yaml": final_yaml,
         "parsed": parsed,
         "warnings": warnings,
-        "valid": parsed is not None and len(warnings) == 0,
+        "valid": valid,
         "devices_considered": len(gns3_devices),
         "vm_templates_considered": len(vm_templates),
         "ollama_server_used": used_server,
