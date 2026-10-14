@@ -207,8 +207,69 @@ def _strip_marker_lines(text: str) -> str:
     return "\n".join(lines[start:end]).strip()
 
 
+VALID_ROLES = ("PC", "VM", "ROUTER", "SWITCH", "FW")
+"""The only roles TopologyBuilder accepts - anything else is rejected there."""
+
+_TRAILING_NUMBER = re.compile(r"^(.*?)(\d+)$")
+
+
+def repair_duplicate_interfaces(parsed: dict) -> list[str]:
+    """
+    Renumbers an interface name a device uses in more than one edge to
+    the next free one of the same pattern (gi0/1 -> gi0/2, eth0 ->
+    eth1, ...). The model - especially the small 8B one this service runs
+    - keeps restarting at gi0/1 for each further link of the same
+    switch, and there is exactly one sensible fix for that (the prompt
+    even tells the model to do it itself), so repairing it here saves a
+    whole LLM round trip of several minutes. Edges are processed in
+    order; the first use of a name keeps it. A name without a trailing
+    number can't be renumbered and is left alone for
+    validate_topology to flag.
+    Mutates parsed["edges"] in place.
+    :return: a human-readable description of each renumbering done
+    """
+    edges = parsed.get("edges")
+    if not isinstance(edges, list):
+        return []
+
+    wellformed = [e for e in edges if isinstance(e, list) and len(e) == 4]
+    taken: dict[str, set[str]] = {}
+    for device_a, interface_a, device_b, interface_b in wellformed:
+        taken.setdefault(str(device_a), set()).add(str(interface_a))
+        taken.setdefault(str(device_b), set()).add(str(interface_b))
+
+    seen: dict[str, set[str]] = {}
+    fixes: list[str] = []
+    for edge in wellformed:
+        for device_index, interface_index in ((0, 1), (2, 3)):
+            device = str(edge[device_index])
+            interface = str(edge[interface_index])
+            used = seen.setdefault(device, set())
+            if interface in used:
+                match = _TRAILING_NUMBER.match(interface)
+                if match is None:
+                    continue
+                prefix, number = match.group(1), int(match.group(2))
+                candidate = number + 1
+                while f"{prefix}{candidate}" in taken[device] | used:
+                    candidate += 1
+                replacement = f"{prefix}{candidate}"
+                edge[interface_index] = replacement
+                taken[device].add(replacement)
+                interface = replacement
+                fixes.append(
+                    f"Renumbered the reused interface '{match.group(0)}' on "
+                    f"'{device}' to '{replacement}'."
+                )
+            used.add(interface)
+    return fixes
+
+
 def validate_topology(
-    yaml_text: str, gns3_devices: list[dict], vm_templates: list[dict]
+    yaml_text: str,
+    gns3_devices: list[dict],
+    vm_templates: list[dict],
+    fixes: Optional[list[str]] = None,
 ) -> tuple[Optional[dict], list[str], bool]:
     """
     Checks the generated YAML for validity and whether every 'image' value
@@ -225,7 +286,9 @@ def validate_topology(
     exactly one possible fix. The model has repeatedly mislabeled a
     firewall/OS VM image (e.g. OPNsense, Windows 11 Pro Education) with a
     GNS3-only role like FW/PC despite the prompt explicitly saying not to.
-    :return: (parsed structure, warnings, whether any role was
+    :param fixes: if given, descriptions of automatic repairs (see
+        repair_duplicate_interfaces) are appended to it
+    :return: (parsed structure, warnings, whether anything was
         auto-corrected)
     """
     warnings: list[str] = []
@@ -253,6 +316,22 @@ def validate_topology(
         image = node.get("image")
         role = node.get("role")
 
+        for required in ("image", "role", "names"):
+            if required not in node:
+                warnings.append(f"Node entry is missing the '{required}' key: {node!r}")
+
+        names = node.get("names")
+        if names is not None and (
+            not isinstance(names, list) or not all(isinstance(n, str) for n in names)
+        ):
+            warnings.append(f"'names' must be a list of text values: {names!r}")
+            names = None
+        if role is not None and role not in VALID_ROLES:
+            warnings.append(
+                f"Role '{role}' is not valid - it must be exactly one of "
+                f"{', '.join(VALID_ROLES)}."
+            )
+
         if image in vm_names and role != "VM":
             log.info(
                 "Auto-correcting role for image '%s': %r -> 'VM' (only "
@@ -277,7 +356,9 @@ def validate_topology(
                     f"of available GNS3 templates."
                 )
 
-        for n in node.get("names") or []:
+        for n in names or []:
+            if n in node_names:
+                warnings.append(f"Device name '{n}' is used more than once.")
             node_names.add(n)
 
     # Same rule TopologyBuilder's own validation enforces (and rejects the
@@ -286,6 +367,14 @@ def validate_topology(
     # such a topology as valid and the caller only found out afterwards -
     # large topologies with many switches hit this repeatedly (the model
     # restarts at gi0/1 for each new link of the same switch).
+    repairs = repair_duplicate_interfaces(parsed)
+    if repairs:
+        corrected = True
+        for repair in repairs:
+            log.info("Auto-repair: %s", repair)
+        if fixes is not None:
+            fixes.extend(repairs)
+
     used_interfaces: dict[str, set[str]] = {}
 
     def _check_interface_unused(device: str, interface: str) -> None:
@@ -302,6 +391,14 @@ def validate_topology(
             warnings.append(f"Invalid edge entry: {edge!r}")
             continue
         device_a, interface_a, device_b, interface_b = edge
+        if not all(isinstance(v, str) for v in edge):
+            warnings.append(
+                f"Edge {edge!r} must contain only text values "
+                f"[DeviceA, InterfaceA, DeviceB, InterfaceB]."
+            )
+            continue
+        if device_a == device_b:
+            warnings.append(f"Edge {edge!r} connects device '{device_a}' to itself.")
         if device_a not in node_names:
             warnings.append(f"Edge references unknown device: '{device_a}'")
         if device_b not in node_names:
@@ -352,7 +449,8 @@ def generate_topology(user_request: str, config: dict) -> dict:
         "devices_considered": <number of GNS3 devices>,
         "vm_templates_considered": <number of NFS VM images>,
         "ollama_server_used": <name of the server that last responded>,
-        "attempts": [{"attempt": 1, "server": "...", "warnings": [...]}, ...],
+        "attempts": [{"attempt": 1, "server": "...", "warnings": [...], "auto_fixes": [...]}, ...],
+        "auto_fixes": <what was repaired automatically in the attempt returned>,
     }
     """
     gns3_api_url = config["gns3_api_url"]
@@ -383,6 +481,7 @@ def generate_topology(user_request: str, config: dict) -> dict:
     )
 
     attempts: list[dict] = []
+    auto_fixes: list[str] = []
     parsed = None
     warnings: list[str] = []
     corrected = False
@@ -407,11 +506,18 @@ def generate_topology(user_request: str, config: dict) -> dict:
             attempts.append({"attempt": attempt, "server": None, "warnings": warnings})
             break
 
+        attempt_fixes: list[str] = []
         parsed, warnings, corrected = validate_topology(
-            raw_response, gns3_devices, vm_templates
+            raw_response, gns3_devices, vm_templates, fixes=attempt_fixes
         )
+        auto_fixes = attempt_fixes
         attempts.append(
-            {"attempt": attempt, "server": used_server, "warnings": list(warnings)}
+            {
+                "attempt": attempt,
+                "server": used_server,
+                "warnings": list(warnings),
+                "auto_fixes": list(attempt_fixes),
+            }
         )
 
         if parsed is not None and not warnings:
@@ -444,4 +550,5 @@ def generate_topology(user_request: str, config: dict) -> dict:
         "vm_templates_considered": len(vm_templates),
         "ollama_server_used": used_server,
         "attempts": attempts,
+        "auto_fixes": auto_fixes,
     }
