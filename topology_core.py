@@ -280,17 +280,63 @@ def validate_topology(
         for n in node.get("names") or []:
             node_names.add(n)
 
+    # Same rule TopologyBuilder's own validation enforces (and rejects the
+    # whole topology over): a device may not use the same interface name
+    # in two edges. Without checking it here too, this service reported
+    # such a topology as valid and the caller only found out afterwards -
+    # large topologies with many switches hit this repeatedly (the model
+    # restarts at gi0/1 for each new link of the same switch).
+    used_interfaces: dict[str, set[str]] = {}
+
+    def _check_interface_unused(device: str, interface: str) -> None:
+        used = used_interfaces.setdefault(device, set())
+        if interface in used:
+            warnings.append(
+                f"Interface '{interface}' is used twice on device '{device}' - "
+                f"every edge of a device needs its own, distinct interface name."
+            )
+        used.add(interface)
+
     for edge in parsed.get("edges", []):
         if not isinstance(edge, list) or len(edge) != 4:
             warnings.append(f"Invalid edge entry: {edge!r}")
             continue
-        device_a, _, device_b, _ = edge
+        device_a, interface_a, device_b, interface_b = edge
         if device_a not in node_names:
             warnings.append(f"Edge references unknown device: '{device_a}'")
         if device_b not in node_names:
             warnings.append(f"Edge references unknown device: '{device_b}'")
+        _check_interface_unused(str(device_a), str(interface_a))
+        _check_interface_unused(str(device_b), str(interface_b))
 
     return parsed, warnings, corrected
+
+
+# ---------- Retry feedback ----------
+MAX_FEEDBACK_WARNINGS = 12
+
+
+def build_retry_prompt(base_prompt: str, previous_response: str, warnings: list[str]) -> str:
+    """
+    The prompt for a retry: the original prompt plus the model's own
+    previous answer and exactly why it was rejected. Resending the bare
+    original prompt made the model repeat the same mistake attempt after
+    attempt (e.g. restarting a switch's interface numbering) - telling it
+    what was wrong lets it fix that instead of rolling the dice again.
+    """
+    shown = warnings[:MAX_FEEDBACK_WARNINGS]
+    problems = "\n".join(f"- {w}" for w in shown)
+    if len(warnings) > len(shown):
+        problems += f"\n- ... and {len(warnings) - len(shown)} more problem(s)"
+    return (
+        f"{base_prompt}\n\n"
+        f"Your previous answer was rejected:\n"
+        f"=== PREVIOUS ANSWER START ===\n{strip_code_fences(previous_response)}\n"
+        f"=== PREVIOUS ANSWER END ===\n\n"
+        f"Problems found:\n{problems}\n\n"
+        f"Fix exactly these problems and answer again with the complete "
+        f"corrected YAML, following all rules above. Start directly with 'nodes:'."
+    )
 
 
 # ---------- Main flow ----------
@@ -346,9 +392,14 @@ def generate_topology(user_request: str, config: dict) -> dict:
 
     for attempt in range(1, max_retries + 1):
         log.info("Generation attempt %d/%d ...", attempt, max_retries)
+        attempt_prompt = (
+            build_retry_prompt(prompt, raw_response, warnings)
+            if attempt > 1 and raw_response and warnings
+            else prompt
+        )
         try:
             raw_response, used_server = call_ollama_with_failover(
-                prompt, servers, request_timeout, skip=dead_servers
+                attempt_prompt, servers, request_timeout, skip=dead_servers
             )
         except RuntimeError as e:
             log.error(str(e))
