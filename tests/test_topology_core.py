@@ -171,3 +171,168 @@ def test_an_unrepairable_answer_is_retried_with_feedback():
     assert len(prompts) == 2
     assert "PREVIOUS ANSWER" not in prompts[0]
     assert "PREVIOUS ANSWER" in prompts[1] and "Role 'SERVER'" in prompts[1]
+
+
+# ---------- OpenAI-compatible servers (free cloud providers) ----------
+
+
+class _Reply:
+    def __init__(self, payload=None, status=200):
+        self._payload = payload
+        self.status_code = status
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise tc.requests.HTTPError(f"{self.status_code} error")
+
+    def json(self):
+        if self._payload is None:
+            raise ValueError("no json")
+        return self._payload
+
+
+OPENAI_SERVER = {
+    "name": "groq",
+    "type": "openai",
+    "url": "https://api.example.test/openai/v1/",
+    "model": "some-model",
+    "api_key_env": "TEST_LLM_KEY",
+}
+
+
+def test_openai_call_sends_bearer_key_from_the_environment(monkeypatch):
+    monkeypatch.setenv("TEST_LLM_KEY", "sekret-value")
+    reply = _Reply({"choices": [{"message": {"content": "nodes: []"}}]})
+    with patch.object(tc.requests, "post", return_value=reply) as post:
+        text = tc.call_llm("make a topology", OPENAI_SERVER, 30)
+    assert text == "nodes: []"
+    assert post.call_args.args[0] == "https://api.example.test/openai/v1/chat/completions"
+    assert post.call_args.kwargs["headers"]["Authorization"] == "Bearer sekret-value"
+    body = post.call_args.kwargs["json"]
+    assert body["model"] == "some-model"
+    assert body["messages"] == [{"role": "user", "content": "make a topology"}]
+
+
+def test_openai_call_without_its_key_is_a_failover_error_not_a_crash(monkeypatch):
+    monkeypatch.delenv("TEST_LLM_KEY", raising=False)
+    with patch.object(tc.requests, "post") as post:
+        try:
+            tc.call_llm("x", OPENAI_SERVER, 30)
+        except tc.requests.RequestException as exc:
+            assert "TEST_LLM_KEY" in str(exc)
+        else:
+            raise AssertionError("expected RequestException")
+    post.assert_not_called()
+
+
+def test_failover_moves_past_a_rate_limited_cloud_server_to_ollama(monkeypatch, caplog):
+    monkeypatch.setenv("TEST_LLM_KEY", "sekret-value")
+    servers = [
+        OPENAI_SERVER,
+        {"name": "local", "type": "ollama", "url": "http://ollama:11434", "model": "m"},
+    ]
+
+    def fake_post(url, **kwargs):
+        if "chat/completions" in url:
+            return _Reply(status=429)
+        return _Reply({"response": "from ollama"})
+
+    with patch.object(tc.requests, "post", side_effect=fake_post):
+        with caplog.at_level("DEBUG"):
+            text, used = tc.call_ollama_with_failover("p", servers, 30)
+    assert (text, used) == ("from ollama", "local")
+    assert "sekret-value" not in caplog.text
+
+
+def test_openai_reply_of_unexpected_shape_counts_as_a_failure(monkeypatch):
+    monkeypatch.setenv("TEST_LLM_KEY", "k")
+    with patch.object(tc.requests, "post", return_value=_Reply({"oops": 1})):
+        try:
+            tc.call_llm("x", OPENAI_SERVER, 30)
+        except tc.requests.RequestException:
+            pass
+        else:
+            raise AssertionError("expected RequestException")
+
+
+def _write_config(tmp_path, servers_yaml):
+    (tmp_path / "prompt_template_file.txt").write_text("{user_request}")
+    (tmp_path / "prompt_template.txt").write_text("{user_request}")
+    (tmp_path / "example_topology.yml").write_text("nodes: []\nedges: []\n")
+    path = tmp_path / "topology_config.yml"
+    path.write_text(f"gns3_api_url: http://x\nollama_servers:\n{servers_yaml}")
+    return str(path)
+
+
+def test_load_config_accepts_both_server_types_and_base_url(tmp_path, monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "k")
+    path = _write_config(
+        tmp_path,
+        "  - {name: local, url: 'http://o:11434', model: m}\n"
+        "  - {name: gemini, type: openai, base_url: 'https://g.test/v1beta/openai',"
+        " model: gm, api_key_env: GEMINI_API_KEY}\n",
+    )
+    servers = tc.load_config(path)["ollama_servers"]
+    assert servers[0]["type"] == "ollama"
+    assert servers[1]["type"] == "openai"
+    assert servers[1]["url"] == "https://g.test/v1beta/openai"
+
+
+def test_load_config_rejects_an_unknown_server_type(tmp_path):
+    path = _write_config(tmp_path, "  - {name: x, type: banana, url: 'http://x', model: m}\n")
+    try:
+        tc.load_config(path)
+    except ValueError as exc:
+        assert "unknown type" in str(exc)
+    else:
+        raise AssertionError("expected ValueError")
+
+
+# ---------- Internet uplink (GNS3 NAT node) ----------
+
+NAT_DEVICES = DEVICES + [{"name": "NAT"}, {"name": "Cisco IOSv"}]
+
+
+def _validate_nat(text):
+    fixes = []
+    parsed, warnings, corrected = tc.validate_topology(text, NAT_DEVICES, [], fixes=fixes)
+    return parsed, warnings, fixes
+
+
+def test_nat_interface_is_renamed_to_its_only_port():
+    parsed, warnings, fixes = _validate_nat(
+        """nodes:
+  - {image: NAT, role: FW, names: [Internet]}
+  - {image: Cisco IOSv, role: ROUTER, names: [R1]}
+edges:
+  - [Internet, gi0/0, R1, gi0/0]
+"""
+    )
+    assert warnings == []
+    assert parsed["edges"][0] == ["Internet", "nat0", "R1", "gi0/0"]
+    assert any("nat0" in fix for fix in fixes)
+
+
+def test_nat_with_two_connections_is_reported():
+    _, warnings, _ = _validate_nat(
+        """nodes:
+  - {image: NAT, role: FW, names: [Internet]}
+  - {image: Cisco IOSv, role: ROUTER, names: [R1, R2]}
+edges:
+  - [Internet, nat0, R1, gi0/0]
+  - [Internet, nat0, R2, gi0/0]
+"""
+    )
+    assert any("only one port" in w for w in warnings)
+
+
+def test_correct_nat_edge_needs_no_repair():
+    parsed, warnings, fixes = _validate_nat(
+        """nodes:
+  - {image: NAT, role: FW, names: [Internet]}
+  - {image: Cisco IOSv, role: ROUTER, names: [R1]}
+edges:
+  - [Internet, nat0, R1, gi0/0]
+"""
+    )
+    assert warnings == [] and fixes == []

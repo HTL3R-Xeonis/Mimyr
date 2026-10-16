@@ -26,6 +26,35 @@ ollama_servers:
   #   url: http://10.20.20.82:11434
   #   model: llama3.1:8b
 
+  # Hosted LLMs with a free tier: type "openai" = any server speaking the
+  # OpenAI chat-completions API. The API key is NOT written here - put it in
+  # the file `.env` next to docker-compose.yml (e.g. GEMINI_API_KEY=...) and
+  # name that variable in `api_key_env`. A server whose key is missing or
+  # that answers with an error (rate limit 429, ...) is skipped and the next
+  # one in this list is tried. Model names change often - check the
+  # provider's current list. Free tiers can use your prompts for training:
+  # the prompts here contain only your topology request and the device
+  # catalog, but don't paste anything confidential into a request.
+  #
+  # - name: gemini
+  #   type: openai
+  #   base_url: https://generativelanguage.googleapis.com/v1beta/openai
+  #   model: gemini-2.5-flash
+  #   api_key_env: GEMINI_API_KEY
+  #
+  # - name: groq
+  #   type: openai
+  #   base_url: https://api.groq.com/openai/v1
+  #   model: llama-3.3-70b-versatile
+  #   api_key_env: GROQ_API_KEY
+  #
+  # - name: openrouter
+  #   type: openai
+  #   base_url: https://openrouter.ai/api/v1
+  #   model: meta-llama/llama-3.3-70b-instruct:free
+  #   api_key_env: OPENROUTER_API_KEY
+  #   # optional: temperature: 0.2, max_tokens: 4000, headers: {X-Title: topology-generator}
+
 # How many times to retry if the LLM doesn't produce valid output (e.g.
 # wrong format, unknown image, broken YAML). Each attempt starts again
 # at ollama_servers[0], except for servers already marked unreachable in

@@ -10,6 +10,7 @@ Used by both the API endpoint (topology_api.py) and the CLI script
 from __future__ import annotations
 
 import logging
+import os
 import re
 from pathlib import Path
 from typing import Optional
@@ -58,9 +59,26 @@ def load_config(config_path: str) -> dict:
         raise ValueError("Config: 'gns3_api_url' is missing.")
 
     for i, server in enumerate(config["ollama_servers"]):
+        server.setdefault("type", "ollama")
+        if server["type"] not in LLM_TYPES:
+            raise ValueError(
+                f"ollama_servers[{i}]: unknown type {server['type']!r} "
+                f"(expected one of {', '.join(LLM_TYPES)})."
+            )
+        if "base_url" in server and "url" not in server:
+            server["url"] = server["base_url"]
         if "url" not in server or "model" not in server:
             raise ValueError(f"ollama_servers[{i}] needs at least 'url' and 'model'.")
         server.setdefault("name", server["url"])
+        key_env = server.get("api_key_env")
+        if key_env and not os.environ.get(key_env):
+            # Not fatal: the server is then skipped at call time (failover), so
+            # one missing key doesn't take the other servers down with it.
+            log.warning(
+                "Server '%s': environment variable %s (api_key_env) is not set.",
+                server["name"],
+                key_env,
+            )
 
     return config
 
@@ -113,7 +131,60 @@ def build_prompt(
     )
 
 
-# ---------- Ollama with failover ----------
+# ---------- LLM servers with failover ----------
+LLM_TYPES = ("ollama", "openai")
+"""Server types: "ollama" (a self-hosted Ollama, /api/generate) and "openai"
+(anything speaking the OpenAI chat-completions API - Groq, Google Gemini's
+OpenAI-compatible endpoint, OpenRouter, Cerebras, Mistral, GitHub Models, a
+local vLLM/LM Studio ...). See the README's config section."""
+
+
+def call_openai_compatible(prompt: str, server: dict, timeout: int) -> str:
+    """
+    One chat-completion call against an OpenAI-compatible endpoint. The API
+    key is read from the environment variable named by the server's
+    `api_key_env` - never from the config file - and never logged.
+    Every failure (missing key, HTTP error incl. 429 rate limit, a reply of an
+    unexpected shape) is raised as requests.RequestException so the failover
+    in call_ollama_with_failover moves on to the next server.
+    """
+    key_env = server.get("api_key_env")
+    headers = {}
+    if key_env:
+        key = os.environ.get(key_env)
+        if not key:
+            raise requests.RequestException(f"environment variable {key_env} is not set")
+        headers["Authorization"] = f"Bearer {key}"
+    headers.update(server.get("headers") or {})
+    body = {
+        "model": server["model"],
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": server.get("temperature", 0.2),
+    }
+    if server.get("max_tokens"):
+        body["max_tokens"] = server["max_tokens"]
+    resp = requests.post(
+        f"{server['url'].rstrip('/')}/chat/completions",
+        json=body,
+        headers=headers,
+        timeout=(CONNECT_TIMEOUT_SECONDS, timeout),
+    )
+    resp.raise_for_status()
+    try:
+        content = resp.json()["choices"][0]["message"]["content"]
+    except (ValueError, KeyError, IndexError, TypeError) as exc:
+        raise requests.RequestException(
+            "unexpected reply shape from the server (no choices[0].message.content)"
+        ) from exc
+    return content or ""
+
+
+def call_llm(prompt: str, server: dict, timeout: int) -> str:
+    if server.get("type", "ollama") == "openai":
+        return call_openai_compatible(prompt, server, timeout)
+    return call_ollama(prompt, server["url"], server["model"], timeout)
+
+
 def call_ollama(prompt: str, url: str, model: str, timeout: int) -> str:
     resp = requests.post(
         f"{url.rstrip('/')}/api/generate",
@@ -158,9 +229,15 @@ def call_ollama_with_failover(
         name = server["name"]
         url = server["url"]
         model = server["model"]
-        log.info("Trying Ollama server '%s' (%s, model=%s) ...", name, url, model)
+        log.info(
+            "Trying %s server '%s' (%s, model=%s) ...",
+            server.get("type", "ollama"),
+            name,
+            url,
+            model,
+        )
         try:
-            response = call_ollama(prompt, url, model, timeout)
+            response = call_llm(prompt, server, timeout)
             log.info("Got a response from '%s'.", name)
             return response, name
         except requests.RequestException as e:
@@ -211,6 +288,45 @@ VALID_ROLES = ("PC", "VM", "ROUTER", "SWITCH", "FW")
 """The only roles TopologyBuilder accepts - anything else is rejected there."""
 
 _TRAILING_NUMBER = re.compile(r"^(.*?)(\d+)$")
+
+
+UPLINK_IMAGE = "nat"
+UPLINK_INTERFACE = "nat0"
+
+
+def _uplink_names(parsed: dict) -> set[str]:
+    """Names of the Internet-uplink devices (GNS3's built-in NAT node)."""
+    names: set[str] = set()
+    for group in parsed.get("nodes") or []:
+        if isinstance(group, dict) and str(group.get("image", "")).strip().lower() == UPLINK_IMAGE:
+            for name in group.get("names") or []:
+                names.add(str(name))
+    return names
+
+
+def repair_uplink_interfaces(parsed: dict) -> list[str]:
+    """
+    The NAT node has exactly one port, called nat0 - not gi0/0 like the
+    prompt's other devices - so a model following the general interface rule
+    names it wrongly. With exactly one edge on the device there is exactly one
+    sensible fix. Mutates parsed["edges"] in place.
+    :return: a description of each rename done
+    """
+    uplinks = _uplink_names(parsed)
+    fixes: list[str] = []
+    edges = [e for e in parsed.get("edges") or [] if isinstance(e, list) and len(e) == 4]
+    for name in uplinks:
+        ends = [(e, i) for e in edges for d, i in ((0, 1), (2, 3)) if str(e[d]) == name]
+        if len(ends) != 1:
+            continue  # unconnected, or too many - validate_topology reports the latter
+        edge, index = ends[0]
+        if str(edge[index]) != UPLINK_INTERFACE:
+            fixes.append(
+                f"Renamed interface '{edge[index]}' on the NAT device '{name}' to "
+                f"'{UPLINK_INTERFACE}' (its only port)."
+            )
+            edge[index] = UPLINK_INTERFACE
+    return fixes
 
 
 def repair_duplicate_interfaces(parsed: dict) -> list[str]:
@@ -367,13 +483,25 @@ def validate_topology(
     # such a topology as valid and the caller only found out afterwards -
     # large topologies with many switches hit this repeatedly (the model
     # restarts at gi0/1 for each new link of the same switch).
-    repairs = repair_duplicate_interfaces(parsed)
+    repairs = repair_uplink_interfaces(parsed) + repair_duplicate_interfaces(parsed)
     if repairs:
         corrected = True
         for repair in repairs:
             log.info("Auto-repair: %s", repair)
         if fixes is not None:
             fixes.extend(repairs)
+
+    for uplink in sorted(_uplink_names(parsed)):
+        connections = sum(
+            1
+            for e in parsed.get("edges") or []
+            if isinstance(e, list) and len(e) == 4 and uplink in (str(e[0]), str(e[2]))
+        )
+        if connections > 1:
+            warnings.append(
+                f"The NAT device '{uplink}' has {connections} connections but only "
+                f"one port ({UPLINK_INTERFACE}) - connect it to exactly one router or switch."
+            )
 
     used_interfaces: dict[str, set[str]] = {}
 

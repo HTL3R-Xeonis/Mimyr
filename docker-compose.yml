@@ -10,5 +10,10 @@ services:
     volumes:
       # Contains topology_config.yml, prompt_template.txt, example_topology.yml
       - ./config:/config:ro
+    # API keys for hosted LLM servers (see config/topology_config.yml) - the
+    # file is optional and must never be committed.
+    env_file:
+      - path: .env
+        required: false
     environment:
       - CONFIG_PATH=/config/topology_config.yml

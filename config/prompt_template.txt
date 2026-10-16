@@ -58,6 +58,14 @@ Rules (follow strictly):
    finishing, go through every edge and confirm both device names exist
    under 'nodes' - if one doesn't, either add it as a node or remove/fix
    the edge.
+8. Internet access: ONLY if the user asks for internet / WAN / outside
+   access, and ONLY if an image named NAT is in list (a): add exactly one
+   node group with image NAT, role FW and the name Internet, and connect
+   it with exactly ONE edge to a router (or the core switch). The NAT
+   device has a single interface called nat0 (not gi0/0), so its edge is
+   written [Internet, nat0, <other device>, <that device's next free
+   interface>]. Never connect it to more than one device, never add it
+   when internet access was not requested.
 
 User's request:
 {user_request}

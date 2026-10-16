@@ -57,7 +57,13 @@ def get_config():
         "gns3_api_url": CONFIG["gns3_api_url"],
         "template_api_url": CONFIG.get("template_api_url"),
         "ollama_servers": [
-            {"name": s["name"], "url": s["url"], "model": s["model"]}
+            {
+                "name": s["name"],
+                "type": s.get("type", "ollama"),
+                "url": s["url"],
+                "model": s["model"],
+                "api_key_set": bool(s.get("api_key_env") and os.environ.get(s["api_key_env"])),
+            }
             for s in CONFIG["ollama_servers"]
         ],
         "max_retries": CONFIG["max_retries"],
