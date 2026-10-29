@@ -163,13 +163,27 @@ def call_openai_compatible(prompt: str, server: dict, timeout: int) -> str:
     }
     if server.get("max_tokens"):
         body["max_tokens"] = server["max_tokens"]
+    # Provider-specific extras, e.g. {"reasoning_effort": "low"} to make a
+    # "thinking" model answer in seconds instead of minutes. Never overrides the
+    # model/messages.
+    for key, value in (server.get("extra_body") or {}).items():
+        body.setdefault(key, value)
     resp = requests.post(
         f"{server['url'].rstrip('/')}/chat/completions",
         json=body,
         headers=headers,
         timeout=(CONNECT_TIMEOUT_SECONDS, timeout),
     )
-    resp.raise_for_status()
+    try:
+        resp.raise_for_status()
+    except requests.HTTPError as exc:
+        # The provider's own error text ("model not found", "quota exceeded", ...) is
+        # what tells the operator what to fix; raise_for_status alone drops it. It
+        # never contains the key (that only travels in the request header).
+        detail = " ".join((resp.text or "").split())[:300]
+        raise requests.RequestException(
+            f"{resp.status_code} {resp.reason}: {detail}"
+        ) from exc
     try:
         content = resp.json()["choices"][0]["message"]["content"]
     except (ValueError, KeyError, IndexError, TypeError) as exc:

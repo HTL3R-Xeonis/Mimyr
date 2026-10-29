@@ -84,7 +84,7 @@ Groq and OpenRouter are in `config/topology_config.yml`.
 | `base_url` | API base, e.g. `https://api.groq.com/openai/v1` (`url` works too) |
 | `model` | the provider's model name |
 | `api_key_env` | NAME of the environment variable holding the key - never the key itself |
-| `temperature`, `max_tokens`, `headers` | optional |
+| `temperature`, `max_tokens`, `headers`, `extra_body` | optional; `extra_body` is merged into the request body (provider-specific options; it did not help the free Gemini 3.8 Flash, which stays slow) |
 
 Keys go into a `.env` file next to `docker-compose.yml` (`GROQ_API_KEY=...`, gitignored,
 loaded by compose; `docker compose up -d` after changing it - `reload-config` does not

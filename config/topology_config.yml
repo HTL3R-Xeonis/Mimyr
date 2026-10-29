@@ -39,8 +39,10 @@ ollama_servers:
   # - name: gemini
   #   type: openai
   #   base_url: https://generativelanguage.googleapis.com/v1beta/openai
-  #   model: gemini-2.5-flash
+  #   model: gemini-3.8-flash
   #   api_key_env: GEMINI_API_KEY
+  #   # Free-tier Gemini 3.8 Flash needs minutes per topology (5 min once; another try with
+  #   # extra_body {reasoning_effort: low} got no answer at all) - fine as a last-resort fallback only.
   #
   # - name: groq
   #   type: openai

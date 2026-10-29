@@ -177,6 +177,9 @@ def test_an_unrepairable_answer_is_retried_with_feedback():
 
 
 class _Reply:
+    reason = "Error"
+    text = ""
+
     def __init__(self, payload=None, status=200):
         self._payload = payload
         self.status_code = status
@@ -336,3 +339,35 @@ edges:
 """
     )
     assert warnings == [] and fixes == []
+
+
+def test_http_errors_carry_the_providers_message_but_never_the_key(monkeypatch):
+    monkeypatch.setenv("TEST_LLM_KEY", "sekret-value")
+
+    class Rejected(_Reply):
+        reason = "Not Found"
+        text = '{"error": {"message": "models/foo is not found for API version v1beta"}}'
+
+    with patch.object(tc.requests, "post", return_value=Rejected(status=404)):
+        try:
+            tc.call_llm("x", OPENAI_SERVER, 30)
+        except tc.requests.RequestException as exc:
+            assert "404 Not Found" in str(exc)
+            assert "models/foo is not found" in str(exc)
+            assert "sekret-value" not in str(exc)
+        else:
+            raise AssertionError("expected RequestException")
+
+
+def test_extra_body_is_merged_but_never_overrides_model_or_messages(monkeypatch):
+    monkeypatch.setenv("TEST_LLM_KEY", "k")
+    server = {
+        **OPENAI_SERVER,
+        "extra_body": {"reasoning_effort": "low", "model": "evil"},
+    }
+    reply = _Reply({"choices": [{"message": {"content": "x"}}]})
+    with patch.object(tc.requests, "post", return_value=reply) as post:
+        tc.call_llm("p", server, 30)
+    body = post.call_args.kwargs["json"]
+    assert body["reasoning_effort"] == "low"
+    assert body["model"] == "some-model"
