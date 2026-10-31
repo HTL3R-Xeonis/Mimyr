@@ -201,11 +201,20 @@ def measure(server: dict, prompt_id: str, run: int, prompt: str, gns3_devices, v
 
 def run_server(server: dict, prompts: list[dict], gns3_devices, vm_templates, cfg: dict, sink, log) -> None:
     """All calls to one model, strictly one after the other."""
+    key_env = server.get("api_key_env")
+    if key_env and not os.environ.get(key_env):
+        log(f"[{server['label']}] skipped: environment variable {key_env} is not set")
+        return
     log(f"[{server['label']}] warm-up")
     try:
         call(server, WARMUP_PROMPT, cfg["timeout"], cfg["temperature"], max_tokens=16)
     except Exception as exc:
-        log(f"[{server['label']}] warm-up failed: {type(exc).__name__}: {str(exc)[:200]}")
+        text = f"{type(exc).__name__}: {str(exc)[:200]}"
+        log(f"[{server['label']}] warm-up failed: {text}")
+        # no access / unknown model: every later call would fail the same way - record that once and stop
+        if any(code in text for code in ("401", "403", "404")):
+            sink({"model": server["label"], "prompt": "-", "run": 0, "ok": False, "valid": False, "seconds": 0.0, "error": text})
+            return
     for prompt in prompts:
         if server.get("prompts") and prompt["id"] not in server["prompts"]:
             continue

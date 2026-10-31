@@ -78,3 +78,22 @@ def test_catalogue_falls_back_to_the_live_gns3_server_when_the_template_api_is_e
     devices, vms, meta = bl.load_catalogs({"gns3_api_url": "http://x"}, {"gns3_live": {"host": "10.0.0.1"}}, snap)
     assert devices == [{"name": "Cisco IOSv"}] and "live from GNS3 server 10.0.0.1" in meta["gns3_source"]
     assert snap.exists()
+
+
+def test_a_model_without_its_key_is_skipped_instead_of_failing_every_call(monkeypatch):
+    monkeypatch.delenv("NO_SUCH_KEY", raising=False)
+    rows, logs = [], []
+    server = {"label": "hosted", "type": "openai", "base_url": "https://x/v1", "model": "m", "api_key_env": "NO_SUCH_KEY"}
+    bl.run_server(server, [{"id": "P1", "full": "p"}], [], [], {"timeout": 5, "temperature": 0.2, "runs": 2}, rows.append, logs.append)
+    assert rows == [] and "NO_SUCH_KEY is not set" in logs[0]
+
+
+def test_a_model_the_account_cannot_use_is_recorded_once(monkeypatch):
+    monkeypatch.setenv("SOME_KEY", "v")
+    monkeypatch.setattr(bl.time, "sleep", lambda s: None)
+    resp = MagicMock(status_code=404, ok=False, reason="Not Found", text="unknown model")
+    monkeypatch.setattr(bl.requests, "post", lambda *a, **k: resp)
+    rows = []
+    server = {"label": "hosted", "type": "openai", "base_url": "https://x/v1", "model": "nope", "api_key_env": "SOME_KEY"}
+    bl.run_server(server, [{"id": "P1", "full": "p"}, {"id": "P2", "full": "p"}], [], [], {"timeout": 5, "temperature": 0.2, "runs": 2}, rows.append, lambda m: None)
+    assert len(rows) == 1 and not rows[0]["ok"] and "404" in rows[0]["error"]
