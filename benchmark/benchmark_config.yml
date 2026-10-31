@@ -1,0 +1,63 @@
+# Models and prompts of the LLM benchmark (goal H8A) - see benchmark_llm.py.
+# Every model gets every prompt `runs` times; calls to one model run one after the other,
+# different hosts run in parallel (they are different machines).
+
+runs: 2
+temperature: 0.2      # same for all models
+timeout: 900          # seconds per call; a model that is slower is recorded as failed
+
+gns3_live:            # used when the GNS3 Template API has no devices (its collector lost the GNS3 VM)
+  host: 10.20.20.227
+  port: 80
+
+models:
+  - label: "granite4.1:8b (ollama .81)"
+    type: ollama
+    url: http://10.20.20.81:11434
+    model: granite4.1:8b
+  - label: "mistral:latest (ollama .81)"
+    type: ollama
+    url: http://10.20.20.81:11434
+    model: mistral:latest
+  - label: "deepseek-coder:1.3b (ollama .85)"
+    type: ollama
+    url: http://10.20.20.85:11434
+    model: deepseek-coder:1.3b
+  - label: "llama3:8b (ollama .176)"
+    type: ollama
+    url: http://10.20.20.176:11434
+    model: llama3:8b
+  - label: "deepseek-r1:14b (ollama .176)"
+    type: ollama
+    url: http://10.20.20.176:11434
+    model: deepseek-r1:14b
+    prompts: [P1, P2]     # a 14B reasoning model needs many minutes per answer on this CPU host
+  # Hosted servers (free tier). The key comes from the environment variable named here.
+  - label: "gemini-3.8-flash (hosted)"
+    type: openai
+    base_url: https://generativelanguage.googleapis.com/v1beta/openai
+    model: gemini-3.8-flash
+    api_key_env: GEMINI_API_KEY
+    pause_seconds: 6     # free-tier rate limit
+  - label: "gemini-3.5-flash (hosted)"
+    type: openai
+    base_url: https://generativelanguage.googleapis.com/v1beta/openai
+    model: gemini-3.5-flash
+    api_key_env: GEMINI_API_KEY
+    pause_seconds: 6
+  - label: "gemini-3.5-flash-lite (hosted)"
+    type: openai
+    base_url: https://generativelanguage.googleapis.com/v1beta/openai
+    model: gemini-3.5-flash-lite
+    api_key_env: GEMINI_API_KEY
+    pause_seconds: 6
+
+prompts:
+  - id: P1
+    text: "Create a small topology with one router and two PCs connected through a switch."
+  - id: P2
+    text: "Build a small office network: one router, one switch, two PCs and one Linux server VM that hosts a web server."
+  - id: P3
+    text: "Build a company network with a firewall that separates three zones: an internal LAN with two switches and four PCs, a DMZ with a web server VM and a file server VM, and an uplink to the internet through a router."
+  - id: P4
+    text: "Create a campus topology with two routers connected to each other, each router with its own switch, three PCs per switch, plus one Linux server VM and one Windows server VM on the second switch, linked redundantly where possible."

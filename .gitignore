@@ -6,3 +6,6 @@ gen
 
 # API keys for hosted LLM servers
 .env
+
+# LLM benchmark results (raw answers, large) - see benchmark/README.md
+benchmark/results/
