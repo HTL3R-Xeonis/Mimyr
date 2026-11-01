@@ -18,7 +18,7 @@ ollama_servers:
     model: granite4.1:8b
 
   - name: ollama-3
-    url: http://10.20.20.176:11434
+    url: http://10.20.20.182:11434
     model: granite4.1:8b
 
   # Add another server:

@@ -23,13 +23,13 @@ models:
     type: ollama
     url: http://10.20.20.85:11434
     model: deepseek-coder:1.3b
-  - label: "llama3:8b (ollama .176)"
+  - label: "llama3:8b (ollama .182)"
     type: ollama
-    url: http://10.20.20.176:11434
+    url: http://10.20.20.182:11434
     model: llama3:8b
-  - label: "deepseek-r1:14b (ollama .176)"
+  - label: "deepseek-r1:14b (ollama .182)"
     type: ollama
-    url: http://10.20.20.176:11434
+    url: http://10.20.20.182:11434
     model: deepseek-r1:14b
     prompts: [P1, P2]     # a 14B reasoning model needs many minutes per answer on this CPU host
   # Hosted servers (free tier). The key comes from the environment variable named here.
