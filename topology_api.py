@@ -29,7 +29,7 @@ try:
         len(CONFIG["ollama_servers"]),
         CONFIG["max_retries"],
     )
-except Exception as e:
+except Exception as e:  # noqa: BLE001 - any problem with the config is reported by /health instead of crashing
     CONFIG_ERROR = str(e)
     log.error("Could not load config: %s", e)
 
@@ -78,7 +78,9 @@ def get_config():
                 "type": s.get("type", "ollama"),
                 "url": s["url"],
                 "model": s["model"],
-                "api_key_set": bool(s.get("api_key_env") and os.environ.get(s["api_key_env"])),
+                "api_key_set": bool(
+                    s.get("api_key_env") and os.environ.get(s["api_key_env"])
+                ),
             }
             for s in CONFIG["ollama_servers"]
         ],
@@ -94,7 +96,7 @@ def reload_config():
     try:
         CONFIG = load_config(CONFIG_PATH)
         CONFIG_ERROR = None
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - any config problem is reported to the caller
         CONFIG_ERROR = str(e)
         raise HTTPException(500, f"Could not reload config: {e}")
 

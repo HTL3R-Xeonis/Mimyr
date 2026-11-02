@@ -35,24 +35,37 @@ import requests
 import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-import topology_core as core  # noqa: E402
+import topology_core as core
 
 WARMUP_PROMPT = "Reply with the single word OK."
 RETRY_STATUS = (429, 500, 502, 503, 504)
-RETRY_WAITS_SECONDS = (20, 40, 60, 90)   # hosted servers answer 429/503 when busy
+RETRY_WAITS_SECONDS = (20, 40, 60, 90)  # hosted servers answer 429/503 when busy
 
 
 def _http_error_text(resp: requests.Response) -> str:
-    return f"{resp.status_code} {resp.reason}: {' '.join((resp.text or '').split())[:200]}"
+    return (
+        f"{resp.status_code} {resp.reason}: {' '.join((resp.text or '').split())[:200]}"
+    )
 
 
-def call_ollama(server: dict, prompt: str, timeout: int, temperature: float, max_tokens: int | None = None) -> dict:
+def call_ollama(
+    server: dict,
+    prompt: str,
+    timeout: int,
+    temperature: float,
+    max_tokens: int | None = None,
+) -> dict:
     options = {"temperature": temperature}
     if max_tokens:
         options["num_predict"] = max_tokens
     resp = requests.post(
         f"{server['url'].rstrip('/')}/api/generate",
-        json={"model": server["model"], "prompt": prompt, "stream": False, "options": options},
+        json={
+            "model": server["model"],
+            "prompt": prompt,
+            "stream": False,
+            "options": options,
+        },
         timeout=(core.CONNECT_TIMEOUT_SECONDS, timeout),
     )
     if not resp.ok:
@@ -71,7 +84,13 @@ def call_ollama(server: dict, prompt: str, timeout: int, temperature: float, max
     }
 
 
-def call_openai(server: dict, prompt: str, timeout: int, temperature: float, max_tokens: int | None = None) -> dict:
+def call_openai(
+    server: dict,
+    prompt: str,
+    timeout: int,
+    temperature: float,
+    max_tokens: int | None = None,
+) -> dict:
     key_env = server.get("api_key_env")
     headers = {}
     if key_env:
@@ -118,12 +137,20 @@ def call_openai(server: dict, prompt: str, timeout: int, temperature: float, max
     }
 
 
-def call(server: dict, prompt: str, timeout: int, temperature: float, max_tokens: int | None = None) -> dict:
+def call(
+    server: dict,
+    prompt: str,
+    timeout: int,
+    temperature: float,
+    max_tokens: int | None = None,
+) -> dict:
     fn = call_openai if server.get("type", "ollama") == "openai" else call_ollama
     return fn(server, prompt, timeout, temperature, max_tokens)
 
 
-def load_catalogs(gen_cfg: dict, cfg: dict, snapshot_path: Path) -> tuple[list[dict], list[dict], dict]:
+def load_catalogs(
+    gen_cfg: dict, cfg: dict, snapshot_path: Path
+) -> tuple[list[dict], list[dict], dict]:
     """
     The device and VM-template lists every model gets in its prompt. They are frozen in a snapshot file so
     that all models (and every later run) see exactly the same catalogue; without a snapshot they are fetched
@@ -140,17 +167,28 @@ def load_catalogs(gen_cfg: dict, cfg: dict, snapshot_path: Path) -> tuple[list[d
         live = cfg["gns3_live"]
         resp = requests.get(
             f"{gen_cfg['gns3_api_url'].rstrip('/')}/api/live-templates",
-            params={"host": live["host"], "port": live.get("port", 80), "include_docker_status": "false"},
+            params={
+                "host": live["host"],
+                "port": live.get("port", 80),
+                "include_docker_status": "false",
+            },
             timeout=60,
         )
         resp.raise_for_status()
         devices = resp.json().get("templates", [])
         source = f"live from GNS3 server {live['host']}"
     vm_templates = core.fetch_nfs_templates(gen_cfg.get("template_api_url"), timeout)
-    meta = {"taken_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "gns3_source": source}
+    meta = {
+        "taken_at": datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S"),
+        "gns3_source": source,
+    }
     snapshot_path.parent.mkdir(parents=True, exist_ok=True)
     snapshot_path.write_text(
-        json.dumps({"meta": meta, "gns3_devices": devices, "vm_templates": vm_templates}, ensure_ascii=False, indent=1),
+        json.dumps(
+            {"meta": meta, "gns3_devices": devices, "vm_templates": vm_templates},
+            ensure_ascii=False,
+            indent=1,
+        ),
         encoding="utf-8",
     )
     return devices, vm_templates, meta
@@ -161,7 +199,15 @@ def host_of(server: dict) -> str:
     return urlparse(url).hostname or url
 
 
-def measure(server: dict, prompt_id: str, run: int, prompt: str, gns3_devices, vm_templates, cfg: dict) -> dict:
+def measure(
+    server: dict,
+    prompt_id: str,
+    run: int,
+    prompt: str,
+    gns3_devices,
+    vm_templates,
+    cfg: dict,
+) -> dict:
     row = {
         "model": server["label"],
         "prompt": prompt_id,
@@ -171,8 +217,10 @@ def measure(server: dict, prompt_id: str, run: int, prompt: str, gns3_devices, v
     }
     start = time.perf_counter()
     try:
-        result = call(server, prompt, cfg["timeout"], cfg["temperature"], server.get("max_tokens"))
-    except Exception as exc:
+        result = call(
+            server, prompt, cfg["timeout"], cfg["temperature"], server.get("max_tokens")
+        )
+    except Exception as exc:  # noqa: BLE001 - a benchmark records any failure of a call as a result row
         row["seconds"] = round(time.perf_counter() - start, 2)
         row["error"] = f"{type(exc).__name__}: {exc}"[:300]
         return row
@@ -187,19 +235,26 @@ def measure(server: dict, prompt_id: str, run: int, prompt: str, gns3_devices, v
         row["tokens_per_second"] = round(row["completion_tokens"] / row["seconds"], 2)
     fixes: list[str] = []
     try:
-        parsed, warnings, _ = core.validate_topology(text, gns3_devices, vm_templates, fixes=fixes)
+        parsed, warnings, _ = core.validate_topology(
+            text, gns3_devices, vm_templates, fixes=fixes
+        )
         row["valid"] = parsed is not None and not warnings
         row["warnings"] = len(warnings)
         row["warning_text"] = "; ".join(warnings[:3])[:300]
         row["auto_fixes"] = len(fixes)
         if parsed:
-            row["nodes"] = sum(len(n.get("names", [1])) if isinstance(n, dict) else 1 for n in parsed.get("nodes", []))
-    except Exception as exc:
+            row["nodes"] = sum(
+                len(n.get("names", [1])) if isinstance(n, dict) else 1
+                for n in parsed.get("nodes", [])
+            )
+    except Exception as exc:  # noqa: BLE001 - a crashing validation is recorded, it must not stop the run
         row["warning_text"] = f"validation crashed: {exc}"[:300]
     return row
 
 
-def run_server(server: dict, prompts: list[dict], gns3_devices, vm_templates, cfg: dict, sink, log) -> None:
+def run_server(
+    server: dict, prompts: list[dict], gns3_devices, vm_templates, cfg: dict, sink, log
+) -> None:
     """All calls to one model, strictly one after the other."""
     key_env = server.get("api_key_env")
     if key_env and not os.environ.get(key_env):
@@ -208,18 +263,36 @@ def run_server(server: dict, prompts: list[dict], gns3_devices, vm_templates, cf
     log(f"[{server['label']}] warm-up")
     try:
         call(server, WARMUP_PROMPT, cfg["timeout"], cfg["temperature"], max_tokens=16)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - any failure of the warm-up call is reported and recorded once
         text = f"{type(exc).__name__}: {str(exc)[:200]}"
         log(f"[{server['label']}] warm-up failed: {text}")
         # no access / unknown model: every later call would fail the same way - record that once and stop
         if any(code in text for code in ("401", "403", "404")):
-            sink({"model": server["label"], "prompt": "-", "run": 0, "ok": False, "valid": False, "seconds": 0.0, "error": text})
+            sink(
+                {
+                    "model": server["label"],
+                    "prompt": "-",
+                    "run": 0,
+                    "ok": False,
+                    "valid": False,
+                    "seconds": 0.0,
+                    "error": text,
+                }
+            )
             return
     for prompt in prompts:
         if server.get("prompts") and prompt["id"] not in server["prompts"]:
             continue
         for run in range(1, cfg["runs"] + 1):
-            row = measure(server, prompt["id"], run, prompt["full"], gns3_devices, vm_templates, cfg)
+            row = measure(
+                server,
+                prompt["id"],
+                run,
+                prompt["full"],
+                gns3_devices,
+                vm_templates,
+                cfg,
+            )
             sink(row)
             state = "ok" if row["ok"] else "FAILED"
             log(
@@ -262,7 +335,9 @@ def summarise(rows: list[dict], models: list[str], prompt_ids: list[str]) -> dic
         mine = [r for r in rows if r["model"] == model]
         out["per_model"][model] = block(mine)
         for pid in prompt_ids:
-            out["per_model_prompt"][f"{model}|{pid}"] = block([r for r in mine if r["prompt"] == pid])
+            out["per_model_prompt"][f"{model}|{pid}"] = block(
+                [r for r in mine if r["prompt"] == pid]
+            )
     return out
 
 
@@ -270,12 +345,23 @@ def _fmt(value, suffix="") -> str:
     return "–" if value is None else f"{value}{suffix}"
 
 
-def write_report(path: Path, started: str, cfg: dict, servers: list[dict], prompts: list[dict], summary: dict, n_dev: int, n_vm: int) -> None:
+def write_report(
+    path: Path,
+    started: str,
+    cfg: dict,
+    servers: list[dict],
+    prompts: list[dict],
+    summary: dict,
+    n_dev: int,
+    n_vm: int,
+) -> None:
     lines = [
         "# LLM benchmark (goal H8A)",
         "",
-        f"Started: {started}  |  runs per model and prompt: {cfg['runs']}  |  temperature: {cfg['temperature']}  |  "
-        f"timeout per call: {cfg['timeout']} s",
+        (
+            f"Started: {started}  |  runs per model and prompt: {cfg['runs']}  |  temperature: {cfg['temperature']}  |  "
+            f"timeout per call: {cfg['timeout']} s"
+        ),
         f"Prompt input: the generator's own prompt with {n_dev} GNS3 devices and {n_vm} VM templates.",
         "",
         "## Models",
@@ -285,7 +371,9 @@ def write_report(path: Path, started: str, cfg: dict, servers: list[dict], promp
     ]
     for s in servers:
         only = f" (only {', '.join(s['prompts'])})" if s.get("prompts") else ""
-        lines.append(f"| {s['label']}{only} | {s.get('type', 'ollama')} | {host_of(s)} | {s['model']} |")
+        lines.append(
+            f"| {s['label']}{only} | {s.get('type', 'ollama')} | {host_of(s)} | {s['model']} |"
+        )
     lines += ["", "## Prompts", "", "| ID | Request |", "|---|---|"]
     for p in prompts:
         lines.append(f"| {p['id']} | {p['text']} |")
@@ -303,12 +391,31 @@ def write_report(path: Path, started: str, cfg: dict, servers: list[dict], promp
             f"{_fmt(s['min'])}–{_fmt(s['max'])} | {_fmt(b['completion_tokens']['mean'])} | "
             f"{_fmt(b['response_chars']['mean'])} | {_fmt(b['tokens_per_second']['mean'])} |"
         )
-    for title, key in (("Time per prompt (mean, s)", "seconds"), ("Answer length per prompt (mean, chars)", "response_chars"), ("Output tokens per prompt (mean)", "completion_tokens")):
-        lines += ["", f"## {title}", "", "| Model | " + " | ".join(p["id"] for p in prompts) + " |", "|---|" + "---|" * len(prompts)]
+    for title, key in (
+        ("Time per prompt (mean, s)", "seconds"),
+        ("Answer length per prompt (mean, chars)", "response_chars"),
+        ("Output tokens per prompt (mean)", "completion_tokens"),
+    ):
+        lines += [
+            "",
+            f"## {title}",
+            "",
+            "| Model | " + " | ".join(p["id"] for p in prompts) + " |",
+            "|---|" + "---|" * len(prompts),
+        ]
         for label in summary["per_model"]:
-            cells = [_fmt(summary["per_model_prompt"][f"{label}|{p['id']}"][key]["mean"]) for p in prompts]
+            cells = [
+                _fmt(summary["per_model_prompt"][f"{label}|{p['id']}"][key]["mean"])
+                for p in prompts
+            ]
             lines.append(f"| {label} | " + " | ".join(cells) + " |")
-    lines += ["", "## Valid topologies per prompt (valid/successful calls)", "", "| Model | " + " | ".join(p["id"] for p in prompts) + " |", "|---|" + "---|" * len(prompts)]
+    lines += [
+        "",
+        "## Valid topologies per prompt (valid/successful calls)",
+        "",
+        "| Model | " + " | ".join(p["id"] for p in prompts) + " |",
+        "|---|" + "---|" * len(prompts),
+    ]
     for label in summary["per_model"]:
         cells = []
         for p in prompts:
@@ -319,14 +426,26 @@ def write_report(path: Path, started: str, cfg: dict, servers: list[dict], promp
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--config", default=str(Path(__file__).with_name("benchmark_config.yml")))
-    parser.add_argument("--generator-config", default=os.environ.get("CONFIG_PATH", "config/topology_config.yml"))
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument(
+        "--config", default=str(Path(__file__).with_name("benchmark_config.yml"))
+    )
+    parser.add_argument(
+        "--generator-config",
+        default=os.environ.get("CONFIG_PATH", "config/topology_config.yml"),
+    )
     parser.add_argument("--out", default="benchmark/results")
-    parser.add_argument("--snapshot", default="benchmark/templates_snapshot.json",
-                        help="frozen device/template lists; created on the first run, reused afterwards")
+    parser.add_argument(
+        "--snapshot",
+        default="benchmark/templates_snapshot.json",
+        help="frozen device/template lists; created on the first run, reused afterwards",
+    )
     parser.add_argument("--runs", type=int, help="override runs per model and prompt")
-    parser.add_argument("--only", help="comma-separated model labels to run (substring match)")
+    parser.add_argument(
+        "--only", help="comma-separated model labels to run (substring match)"
+    )
     parser.add_argument("--prompts", help="comma-separated prompt ids, e.g. P1,P2")
     args = parser.parse_args()
 
@@ -343,30 +462,42 @@ def main() -> int:
         prompts = [p for p in prompts if p["id"] in ids]
 
     gen_cfg = core.load_config(args.generator_config)
-    gns3_devices, vm_templates, catalog_meta = load_catalogs(gen_cfg, cfg, Path(args.snapshot))
+    gns3_devices, vm_templates, catalog_meta = load_catalogs(
+        gen_cfg, cfg, Path(args.snapshot)
+    )
     for p in prompts:
-        p["full"] = core.build_prompt(p["text"], gns3_devices, vm_templates, gen_cfg["prompt_template"], gen_cfg["example_topology"])
+        p["full"] = core.build_prompt(
+            p["text"],
+            gns3_devices,
+            vm_templates,
+            gen_cfg["prompt_template"],
+            gen_cfg["example_topology"],
+        )
         p["prompt_chars"] = len(p["full"])
 
-    started = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    out_dir = Path(args.out) / datetime.now().strftime("%Y%m%d-%H%M%S")
+    started = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S")
+    out_dir = Path(args.out) / datetime.now().astimezone().strftime("%Y%m%d-%H%M%S")
     out_dir.mkdir(parents=True, exist_ok=True)
     lock = threading.Lock()
     rows: list[dict] = []
-    raw = open(out_dir / "raw.jsonl", "a", encoding="utf-8")
+    raw_path = out_dir / "raw.jsonl"
 
     def sink(row: dict) -> None:
         with lock:
             rows.append(row)
-            raw.write(json.dumps(row, ensure_ascii=False) + "\n")
-            raw.flush()
+            with open(
+                raw_path, "a", encoding="utf-8"
+            ) as raw:  # one line per call; nothing stays open
+                raw.write(json.dumps(row, ensure_ascii=False) + "\n")
 
     def log(msg: str) -> None:
         with lock:
-            print(f"{datetime.now():%H:%M:%S} {msg}", flush=True)
+            print(f"{datetime.now().astimezone():%H:%M:%S} {msg}", flush=True)
 
-    log(f"{len(servers)} model(s), {len(prompts)} prompt(s), {cfg['runs']} run(s) each; "
-        f"{len(gns3_devices)} GNS3 devices, {len(vm_templates)} VM templates; results in {out_dir}")
+    log(
+        f"{len(servers)} model(s), {len(prompts)} prompt(s), {cfg['runs']} run(s) each; "
+        f"{len(gns3_devices)} GNS3 devices, {len(vm_templates)} VM templates; results in {out_dir}"
+    )
 
     by_host: dict[str, list[dict]] = {}
     for s in servers:
@@ -376,12 +507,13 @@ def main() -> int:
         for s in group:
             run_server(s, prompts, gns3_devices, vm_templates, cfg, sink, log)
 
-    threads = [threading.Thread(target=host_worker, args=(g,)) for g in by_host.values()]
+    threads = [
+        threading.Thread(target=host_worker, args=(g,)) for g in by_host.values()
+    ]
     for t in threads:
         t.start()
     for t in threads:
         t.join()
-    raw.close()
 
     labels = [s["label"] for s in servers]
     summary = summarise(rows, labels, [p["id"] for p in prompts])
@@ -393,25 +525,90 @@ def main() -> int:
         "gns3_devices": len(gns3_devices),
         "vm_templates": len(vm_templates),
         "catalog": catalog_meta,
-        "models": [{"label": s["label"], "type": s.get("type", "ollama"), "host": host_of(s), "model": s["model"]} for s in servers],
-        "prompts": [{"id": p["id"], "text": p["text"], "prompt_chars": p["prompt_chars"]} for p in prompts],
+        "models": [
+            {
+                "label": s["label"],
+                "type": s.get("type", "ollama"),
+                "host": host_of(s),
+                "model": s["model"],
+            }
+            for s in servers
+        ],
+        "prompts": [
+            {"id": p["id"], "text": p["text"], "prompt_chars": p["prompt_chars"]}
+            for p in prompts
+        ],
     }
-    (out_dir / "summary.json").write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
-    columns = ["model", "prompt", "run", "ok", "valid", "seconds", "prompt_tokens", "completion_tokens", "reasoning_tokens",
-               "response_chars", "response_lines", "tokens_per_second", "warnings", "auto_fixes", "nodes", "load_seconds", "error"]
+    (out_dir / "summary.json").write_text(
+        json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
+    columns = [
+        "model",
+        "prompt",
+        "run",
+        "ok",
+        "valid",
+        "seconds",
+        "prompt_tokens",
+        "completion_tokens",
+        "reasoning_tokens",
+        "response_chars",
+        "response_lines",
+        "tokens_per_second",
+        "warnings",
+        "auto_fixes",
+        "nodes",
+        "load_seconds",
+        "error",
+    ]
     with open(out_dir / "calls.csv", "w", newline="", encoding="utf-8") as fh:
         writer = csv.DictWriter(fh, fieldnames=columns, extrasaction="ignore")
         writer.writeheader()
         writer.writerows(rows)
     with open(out_dir / "summary.csv", "w", newline="", encoding="utf-8") as fh:
         writer = csv.writer(fh)
-        writer.writerow(["model", "calls", "ok", "valid", "time_mean_s", "time_median_s", "time_min_s", "time_max_s",
-                         "output_tokens_mean", "answer_chars_mean", "tokens_per_s_mean"])
+        writer.writerow(
+            [
+                "model",
+                "calls",
+                "ok",
+                "valid",
+                "time_mean_s",
+                "time_median_s",
+                "time_min_s",
+                "time_max_s",
+                "output_tokens_mean",
+                "answer_chars_mean",
+                "tokens_per_s_mean",
+            ]
+        )
         for label, b in summary["per_model"].items():
             s = b["seconds"]
-            writer.writerow([label, b["calls"], b["ok"], b["valid"], s["mean"], s["median"], s["min"], s["max"],
-                             b["completion_tokens"]["mean"], b["response_chars"]["mean"], b["tokens_per_second"]["mean"]])
-    write_report(out_dir / "report.md", started, cfg, servers, prompts, summary, len(gns3_devices), len(vm_templates))
+            writer.writerow(
+                [
+                    label,
+                    b["calls"],
+                    b["ok"],
+                    b["valid"],
+                    s["mean"],
+                    s["median"],
+                    s["min"],
+                    s["max"],
+                    b["completion_tokens"]["mean"],
+                    b["response_chars"]["mean"],
+                    b["tokens_per_second"]["mean"],
+                ]
+            )
+    write_report(
+        out_dir / "report.md",
+        started,
+        cfg,
+        servers,
+        prompts,
+        summary,
+        len(gns3_devices),
+        len(vm_templates),
+    )
     log(f"done - report: {out_dir / 'report.md'}")
     return 0
 

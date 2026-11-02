@@ -13,7 +13,6 @@ import logging
 import os
 import re
 from pathlib import Path
-from typing import Optional
 
 import requests
 import yaml
@@ -153,7 +152,9 @@ def call_openai_compatible(prompt: str, server: dict, timeout: int) -> str:
     if key_env:
         key = os.environ.get(key_env)
         if not key:
-            raise requests.RequestException(f"environment variable {key_env} is not set")
+            raise requests.RequestException(
+                f"environment variable {key_env} is not set"
+            )
         headers["Authorization"] = f"Bearer {key}"
     headers.update(server.get("headers") or {})
     body = {
@@ -229,7 +230,7 @@ def call_ollama_with_failover(
     that already failed in an earlier attempt, so they aren't queried
     again on every retry.
     """
-    last_error: Optional[Exception] = None
+    last_error: Exception | None = None
     skip = skip if skip is not None else set()
     candidates = [s for s in servers if s["name"] not in skip]
 
@@ -312,7 +313,10 @@ def _uplink_names(parsed: dict) -> set[str]:
     """Names of the Internet-uplink devices (GNS3's built-in NAT node)."""
     names: set[str] = set()
     for group in parsed.get("nodes") or []:
-        if isinstance(group, dict) and str(group.get("image", "")).strip().lower() == UPLINK_IMAGE:
+        if (
+            isinstance(group, dict)
+            and str(group.get("image", "")).strip().lower() == UPLINK_IMAGE
+        ):
             for name in group.get("names") or []:
                 names.add(str(name))
     return names
@@ -328,7 +332,9 @@ def repair_uplink_interfaces(parsed: dict) -> list[str]:
     """
     uplinks = _uplink_names(parsed)
     fixes: list[str] = []
-    edges = [e for e in parsed.get("edges") or [] if isinstance(e, list) and len(e) == 4]
+    edges = [
+        e for e in parsed.get("edges") or [] if isinstance(e, list) and len(e) == 4
+    ]
     for name in uplinks:
         ends = [(e, i) for e in edges for d, i in ((0, 1), (2, 3)) if str(e[d]) == name]
         if len(ends) != 1:
@@ -399,8 +405,8 @@ def validate_topology(
     yaml_text: str,
     gns3_devices: list[dict],
     vm_templates: list[dict],
-    fixes: Optional[list[str]] = None,
-) -> tuple[Optional[dict], list[str], bool]:
+    fixes: list[str] | None = None,
+) -> tuple[dict | None, list[str], bool]:
     """
     Checks the generated YAML for validity and whether every 'image' value
     matches its expected source:
@@ -555,7 +561,9 @@ def validate_topology(
 MAX_FEEDBACK_WARNINGS = 12
 
 
-def build_retry_prompt(base_prompt: str, previous_response: str, warnings: list[str]) -> str:
+def build_retry_prompt(
+    base_prompt: str, previous_response: str, warnings: list[str]
+) -> str:
     """
     The prompt for a retry: the original prompt plus the model's own
     previous answer and exactly why it was rejected. Resending the bare
@@ -628,7 +636,7 @@ def generate_topology(user_request: str, config: dict) -> dict:
     warnings: list[str] = []
     corrected = False
     raw_response = ""
-    used_server: Optional[str] = None
+    used_server: str | None = None
     dead_servers: set[str] = set()
 
     for attempt in range(1, max_retries + 1):

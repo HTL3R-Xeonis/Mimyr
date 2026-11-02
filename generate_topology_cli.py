@@ -28,7 +28,9 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Generates a GNS3 topology config via an Ollama LLM."
     )
-    parser.add_argument("--prompt", required=True, help="Description of the desired topology")
+    parser.add_argument(
+        "--prompt", required=True, help="Description of the desired topology"
+    )
     parser.add_argument(
         "--config", default="topology_config.yml", help="Path to the config file"
     )

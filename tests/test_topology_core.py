@@ -13,7 +13,7 @@ import yaml
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), os.pardir))
 
-import topology_core as tc  # noqa: E402
+import topology_core as tc
 
 DEVICES = [{"name": "VPCS"}, {"name": "Ethernet switch"}]
 
@@ -209,7 +209,9 @@ def test_openai_call_sends_bearer_key_from_the_environment(monkeypatch):
     with patch.object(tc.requests, "post", return_value=reply) as post:
         text = tc.call_llm("make a topology", OPENAI_SERVER, 30)
     assert text == "nodes: []"
-    assert post.call_args.args[0] == "https://api.example.test/openai/v1/chat/completions"
+    assert (
+        post.call_args.args[0] == "https://api.example.test/openai/v1/chat/completions"
+    )
     assert post.call_args.kwargs["headers"]["Authorization"] == "Bearer sekret-value"
     body = post.call_args.kwargs["json"]
     assert body["model"] == "some-model"
@@ -240,9 +242,11 @@ def test_failover_moves_past_a_rate_limited_cloud_server_to_ollama(monkeypatch, 
             return _Reply(status=429)
         return _Reply({"response": "from ollama"})
 
-    with patch.object(tc.requests, "post", side_effect=fake_post):
-        with caplog.at_level("DEBUG"):
-            text, used = tc.call_ollama_with_failover("p", servers, 30)
+    with (
+        patch.object(tc.requests, "post", side_effect=fake_post),
+        caplog.at_level("DEBUG"),
+    ):
+        text, used = tc.call_ollama_with_failover("p", servers, 30)
     assert (text, used) == ("from ollama", "local")
     assert "sekret-value" not in caplog.text
 
@@ -282,7 +286,9 @@ def test_load_config_accepts_both_server_types_and_base_url(tmp_path, monkeypatc
 
 
 def test_load_config_rejects_an_unknown_server_type(tmp_path):
-    path = _write_config(tmp_path, "  - {name: x, type: banana, url: 'http://x', model: m}\n")
+    path = _write_config(
+        tmp_path, "  - {name: x, type: banana, url: 'http://x', model: m}\n"
+    )
     try:
         tc.load_config(path)
     except ValueError as exc:
@@ -298,7 +304,9 @@ NAT_DEVICES = DEVICES + [{"name": "NAT"}, {"name": "Cisco IOSv"}]
 
 def _validate_nat(text):
     fixes = []
-    parsed, warnings, corrected = tc.validate_topology(text, NAT_DEVICES, [], fixes=fixes)
+    parsed, warnings, _corrected = tc.validate_topology(
+        text, NAT_DEVICES, [], fixes=fixes
+    )
     return parsed, warnings, fixes
 
 
@@ -330,7 +338,7 @@ edges:
 
 
 def test_correct_nat_edge_needs_no_repair():
-    parsed, warnings, fixes = _validate_nat(
+    _parsed, warnings, fixes = _validate_nat(
         """nodes:
   - {image: NAT, role: FW, names: [Internet]}
   - {image: Cisco IOSv, role: ROUTER, names: [R1]}
@@ -346,7 +354,9 @@ def test_http_errors_carry_the_providers_message_but_never_the_key(monkeypatch):
 
     class Rejected(_Reply):
         reason = "Not Found"
-        text = '{"error": {"message": "models/foo is not found for API version v1beta"}}'
+        text = (
+            '{"error": {"message": "models/foo is not found for API version v1beta"}}'
+        )
 
     with patch.object(tc.requests, "post", return_value=Rejected(status=404)):
         try:
