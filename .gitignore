@@ -9,3 +9,6 @@ gen
 
 # LLM benchmark results (raw answers, large) - see benchmark/README.md
 benchmark/results/
+
+# Python bytecode caches
+__pycache__/
