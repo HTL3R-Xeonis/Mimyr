@@ -4,6 +4,7 @@ import logging
 import os
 
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from topology_core import generate_topology, load_config
@@ -45,6 +46,21 @@ def root():
         "config_loaded": CONFIG is not None,
         "config_error": CONFIG_ERROR,
     }
+
+
+@app.get("/health")
+def health():
+    """Whether the generator can work at all: its config is loaded. The LLM servers are not asked (that can be slow)."""
+    if CONFIG is None:
+        return JSONResponse(
+            {
+                "status": "degraded",
+                "servers": 0,
+                "problems": [f"config not loaded: {CONFIG_ERROR}"],
+            },
+            status_code=503,
+        )
+    return {"status": "ok", "servers": len(CONFIG["ollama_servers"]), "problems": []}
 
 
 @app.get("/api/config")
