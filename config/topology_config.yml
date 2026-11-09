@@ -5,10 +5,29 @@
 gns3_api_url: http://10.20.20.171:8001
 template_api_url: http://10.20.20.171:8000
 
-# Multiple Ollama servers are supported. They are tried in order - as
-# soon as one responds successfully, its result is used. Acts as a
-# fallback in case a server is down or overloaded.
+# LLM servers, tried in order - as soon as one responds successfully, its result is used; a server that is
+# down, overloaded, rate-limited or without its API key is skipped and the next one is tried.
+# The order follows the benchmark (diploma goal H8A, same prompts for every model, valid = passes the generator's
+# own validation): gemini-3.5-flash-lite 1.1 s mean 8/8 valid, gemini-3.5-flash 13.3 s 8/8, granite4.1:8b 114 s 6/8,
+# everything else local 0 valid. So the hosted Gemini models come first and the local Ollama servers are only the
+# fallback for when the hosted ones are not reachable or the free-tier limit is used up.
+# Hosted: the API key is NOT written here - it is GEMINI_API_KEY in the file `.env` next to docker-compose.yml.
+# Free tiers can use prompts for training: the prompt contains only the topology request and the device catalog,
+# but do not paste anything confidential into a request.
 ollama_servers:
+  - name: gemini-flash-lite
+    type: openai
+    base_url: https://generativelanguage.googleapis.com/v1beta/openai
+    model: gemini-3.5-flash-lite
+    api_key_env: GEMINI_API_KEY
+
+  - name: gemini-flash
+    type: openai
+    base_url: https://generativelanguage.googleapis.com/v1beta/openai
+    model: gemini-3.5-flash
+    api_key_env: GEMINI_API_KEY
+
+  # Local fallback (granite4.1:8b: 6 of 8 valid, about two minutes per topology)
   - name: ollama-1
     url: http://10.20.20.81:11434
     model: granite4.1:8b
@@ -26,23 +45,8 @@ ollama_servers:
   #   url: http://10.20.20.82:11434
   #   model: llama3.1:8b
 
-  # Hosted LLMs with a free tier: type "openai" = any server speaking the
-  # OpenAI chat-completions API. The API key is NOT written here - put it in
-  # the file `.env` next to docker-compose.yml (e.g. GEMINI_API_KEY=...) and
-  # name that variable in `api_key_env`. A server whose key is missing or
-  # that answers with an error (rate limit 429, ...) is skipped and the next
-  # one in this list is tried. Model names change often - check the
-  # provider's current list. Free tiers can use your prompts for training:
-  # the prompts here contain only your topology request and the device
-  # catalog, but don't paste anything confidential into a request.
-  #
-  # - name: gemini
-  #   type: openai
-  #   base_url: https://generativelanguage.googleapis.com/v1beta/openai
-  #   model: gemini-3.8-flash
-  #   api_key_env: GEMINI_API_KEY
-  #   # Free-tier Gemini 3.8 Flash needs minutes per topology (5 min once; another try with
-  #   # extra_body {reasoning_effort: low} got no answer at all) - fine as a last-resort fallback only.
+  # More hosted servers (type "openai" = anything speaking the OpenAI chat-completions API; model names change
+  # often - check the provider's list):
   #
   # - name: groq
   #   type: openai
