@@ -16,7 +16,12 @@ from attachment_inputs import (
     read_attachment,
     screenshot_dimensions,
 )
-from topology_core import generate_topology, load_config, supports_attachments
+from topology_core import (
+    generate_topology,
+    load_config,
+    suggest_fix,
+    supports_attachments,
+)
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s"
@@ -45,6 +50,13 @@ except Exception as e:  # noqa: BLE001 - any problem with the config is reported
 
 class TopologyRequest(BaseModel):
     prompt: str
+
+
+class FixSuggestionRequest(BaseModel):
+    device_role: str
+    device_image: str
+    context: str
+    goal: str
 
 
 @app.get("/")
@@ -130,6 +142,38 @@ def generate(request: TopologyRequest):
         raise HTTPException(502, f"Error during generation: {e}")
 
     return result
+
+
+@app.post("/api/suggest-fix")
+def suggest_fix_endpoint(request: FixSuggestionRequest):
+    """
+    One best-effort device-config suggestion for a failed health check -
+    see topology_core.suggest_fix's own docstring. The caller (TopologyOperator's
+    app/fix_jobs.py) retries by calling this again; a single call here never retries.
+    """
+    if CONFIG is None:
+        raise HTTPException(500, f"Could not load config: {CONFIG_ERROR}")
+    if CONFIG.get("fix_prompt_template") is None:
+        raise HTTPException(
+            503,
+            "This Topology Generator has no fix_prompt_template_file configured.",
+        )
+    if not request.device_role.strip() or not request.device_image.strip():
+        raise HTTPException(400, "'device_role' and 'device_image' must not be empty.")
+
+    try:
+        return suggest_fix(
+            request.device_role,
+            request.device_image,
+            request.context,
+            request.goal,
+            CONFIG,
+        )
+    except ValueError as e:
+        raise HTTPException(503, str(e))
+    except Exception as e:
+        log.exception("Error during fix suggestion")
+        raise HTTPException(502, f"Error during fix suggestion: {e}")
 
 
 MAX_ATTACHMENT_COUNT = 5

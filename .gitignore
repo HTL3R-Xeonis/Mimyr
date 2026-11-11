@@ -12,3 +12,6 @@ benchmark/results/
 
 # Python bytecode caches
 __pycache__/
+
+# Local virtualenv (not shipped - the Docker image installs requirements.txt itself)
+.venv/

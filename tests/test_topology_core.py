@@ -5,10 +5,12 @@ requirements.txt - the Docker image only ships topology_core.py and
 topology_api.py).
 """
 
+import json
 import os
 import sys
 from unittest.mock import patch
 
+import pytest
 import yaml
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), os.pardir))
@@ -381,3 +383,104 @@ def test_extra_body_is_merged_but_never_overrides_model_or_messages(monkeypatch)
     body = post.call_args.kwargs["json"]
     assert body["reasoning_effort"] == "low"
     assert body["model"] == "some-model"
+
+
+# ---------- Health-check fix suggestions ----------
+
+FIX_TEMPLATE = "ROLE={device_role} IMAGE={device_image} CTX={context} GOAL={goal}"
+
+
+def _fix_config(fix_prompt_template=FIX_TEMPLATE):
+    return {
+        "ollama_servers": [{"name": "fake", "url": "u", "model": "m"}],
+        "request_timeout": 1,
+        "fix_prompt_template": fix_prompt_template,
+    }
+
+
+def test_build_fix_prompt_fills_every_placeholder():
+    prompt = tc.build_fix_prompt(
+        "ROUTER", "Cisco IOSv", " ctx ", " goal ", FIX_TEMPLATE
+    )
+    assert prompt == "ROLE=ROUTER IMAGE=Cisco IOSv CTX=ctx GOAL=goal"
+
+
+def test_build_fix_prompt_defaults_an_empty_goal():
+    prompt = tc.build_fix_prompt("ROUTER", "Cisco IOSv", "ctx", "   ", FIX_TEMPLATE)
+    assert "GOAL=(none given)" in prompt
+
+
+def test_parse_fix_reply_accepts_a_fenced_json_object():
+    text = '```json\n{"valid": true, "commands": ["a", "b"], "explanation": "why"}\n```'
+    reply = tc.parse_fix_reply(text)
+    assert reply == {
+        "valid": True,
+        "warnings": [],
+        "commands": ["a", "b"],
+        "explanation": "why",
+    }
+
+
+def test_parse_fix_reply_caps_warnings_and_commands_and_drops_non_strings():
+    data = {
+        "valid": False,
+        "warnings": ["w"] * 25,
+        "commands": ["c"] * 150 + [42],
+        "explanation": "e",
+    }
+    reply = tc.parse_fix_reply(json.dumps(data))
+    assert len(reply["warnings"]) == 20
+    assert len(reply["commands"]) == 100
+    assert all(c == "c" for c in reply["commands"])
+
+
+def test_parse_fix_reply_rejects_non_json():
+    with pytest.raises(ValueError, match="not valid JSON"):
+        tc.parse_fix_reply("not json at all")
+
+
+def test_parse_fix_reply_rejects_a_json_array():
+    with pytest.raises(TypeError, match="JSON object"):
+        tc.parse_fix_reply("[1, 2, 3]")
+
+
+def test_suggest_fix_sends_the_built_prompt_and_returns_the_parsed_reply():
+    reply_text = '{"valid": true, "commands": ["conf t"], "explanation": "fix it"}'
+    with patch.object(
+        tc, "call_ollama_with_failover", return_value=(reply_text, "fake")
+    ) as fake_call:
+        result = tc.suggest_fix("ROUTER", "Cisco IOSv", "ctx", "goal", _fix_config())
+
+    prompt = fake_call.call_args.args[0]
+    assert "ROLE=ROUTER" in prompt and "GOAL=goal" in prompt
+    assert result["valid"] is True
+    assert result["commands"] == ["conf t"]
+    assert result["ollama_server_used"] == "fake"
+
+
+def test_suggest_fix_turns_a_malformed_reply_into_an_invalid_result_not_a_crash():
+    with patch.object(
+        tc, "call_ollama_with_failover", return_value=("not json", "fake")
+    ):
+        result = tc.suggest_fix("ROUTER", "Cisco IOSv", "ctx", "", _fix_config())
+
+    assert result["valid"] is False
+    assert result["commands"] == []
+    assert "Malformed response" in result["warnings"][0]
+
+
+def test_suggest_fix_raises_without_a_configured_template():
+    with pytest.raises(ValueError, match="fix prompt template"):
+        tc.suggest_fix(
+            "ROUTER", "Cisco IOSv", "ctx", "goal", _fix_config(fix_prompt_template=None)
+        )
+
+
+def test_suggest_fix_propagates_a_total_failover_failure():
+    with (
+        patch.object(
+            tc, "call_ollama_with_failover", side_effect=RuntimeError("all down")
+        ),
+        pytest.raises(RuntimeError, match="all down"),
+    ):
+        tc.suggest_fix("ROUTER", "Cisco IOSv", "ctx", "goal", _fix_config())

@@ -9,6 +9,7 @@ Used by both the API endpoint (topology_api.py) and the CLI script
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import re
@@ -49,6 +50,18 @@ def load_config(config_path: str) -> dict:
     if not example_path.exists():
         raise FileNotFoundError(f"Example topology file not found: {example_path}")
     config["example_topology"] = example_path.read_text(encoding="utf-8")
+
+    # Optional, unlike the two above: a deployment that hasn't added this
+    # file yet keeps working for topology generation - only /api/suggest-fix
+    # reports it is unavailable (see topology_api.py), instead of the whole
+    # config refusing to load.
+    fix_prompt_file = config.get("fix_prompt_template_file", "fix_prompt_template.txt")
+    fix_prompt_path = base_dir / fix_prompt_file
+    config["fix_prompt_template"] = (
+        fix_prompt_path.read_text(encoding="utf-8")
+        if fix_prompt_path.exists()
+        else None
+    )
 
     config.setdefault("ollama_servers", [])
     config.setdefault("max_retries", 3)
@@ -406,11 +419,11 @@ def call_ollama_with_failover(
 
 # ---------- Clean up & validate output ----------
 def strip_code_fences(text: str) -> str:
-    """Strips ```yaml ... ``` fences as well as separator/marker lines the
-    model added on its own (e.g. '--- START ---' or '=== END ===')."""
+    """Strips ```yaml/```json ... ``` fences as well as separator/marker lines
+    the model added on its own (e.g. '--- START ---' or '=== END ===')."""
     text = text.strip()
 
-    match = re.match(r"^```(?:yaml)?\s*\n(.*?)\n```$", text, re.DOTALL)
+    match = re.match(r"^```(?:yaml|json)?\s*\n(.*?)\n```$", text, re.DOTALL)
     if match:
         text = match.group(1).strip()
 
@@ -917,3 +930,92 @@ def generate_topology(
             "positions": screenshot_positions,
         }
     return result
+
+
+# ---------- Health-check fix suggestions ----------
+_MAX_FIX_WARNINGS = 20
+_MAX_FIX_COMMANDS = 100
+
+
+def build_fix_prompt(
+    device_role: str,
+    device_image: str,
+    context: str,
+    goal: str,
+    fix_prompt_template: str,
+) -> str:
+    return fix_prompt_template.format(
+        device_role=device_role.strip(),
+        device_image=device_image.strip(),
+        context=context.strip(),
+        goal=goal.strip() or "(none given)",
+    )
+
+
+def parse_fix_reply(raw_response: str) -> dict:
+    """
+    Parses the LLM's JSON reply into the flat {valid, warnings, commands,
+    explanation} shape the Operator's own FixReply model expects (see
+    TopologyOperator's app/fix_jobs.py).
+    :raises ValueError: not valid JSON.
+    :raises TypeError: not a JSON object, or 'warnings'/'commands' are not lists.
+    """
+    text = strip_code_fences(raw_response)
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as e:
+        raise ValueError(f"not valid JSON ({e})") from e
+    if not isinstance(data, dict):
+        raise TypeError("response is not a JSON object")
+
+    warnings = data.get("warnings") or []
+    commands = data.get("commands") or []
+    if not isinstance(warnings, list) or not isinstance(commands, list):
+        raise TypeError("'warnings'/'commands' must be lists")
+
+    return {
+        "valid": bool(data.get("valid")),
+        "warnings": [str(w) for w in warnings][:_MAX_FIX_WARNINGS],
+        "commands": [str(c) for c in commands if isinstance(c, str)][
+            :_MAX_FIX_COMMANDS
+        ],
+        "explanation": str(data.get("explanation") or ""),
+    }
+
+
+def suggest_fix(
+    device_role: str, device_image: str, context: str, goal: str, config: dict
+) -> dict:
+    """
+    One best-effort attempt at a device-config fix for a failed health
+    check. Unlike generate_topology, this makes no retry attempt of its
+    own on an invalid/malformed reply - the Operator already retries by
+    calling this endpoint again (app/fix_jobs.py's own retry loop), each
+    call a fresh, independent attempt.
+    :raises ValueError: no fix prompt template is configured (see
+        load_config's fix_prompt_template_file).
+    :raises RuntimeError: every configured LLM server failed (see
+        call_ollama_with_failover).
+    """
+    fix_prompt_template = config.get("fix_prompt_template")
+    if not fix_prompt_template:
+        raise ValueError(
+            "No fix prompt template is configured (fix_prompt_template_file)."
+        )
+    prompt = build_fix_prompt(
+        device_role, device_image, context, goal, fix_prompt_template
+    )
+    raw_response, used_server = call_ollama_with_failover(
+        prompt, config["ollama_servers"], config.get("request_timeout", 300)
+    )
+    try:
+        reply = parse_fix_reply(raw_response)
+    except (ValueError, TypeError) as e:
+        reply = {
+            "valid": False,
+            "warnings": [f"Malformed response: {e}"],
+            "commands": [],
+            "explanation": "",
+        }
+    reply["ollama_server_used"] = used_server
+    return reply

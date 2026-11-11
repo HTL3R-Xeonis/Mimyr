@@ -101,6 +101,7 @@ the prompts should stay inside the network, *before* them if speed matters more.
 | `GET /api/config` | Currently loaded config (without the full prompt/example text) |
 | `POST /api/reload-config` | Reloads the config files without restarting the container |
 | `POST /api/generate-topology` | Body: `{"prompt": "..."}`. Generates a topology; see response shape below |
+| `POST /api/suggest-fix` | Body: `{"device_role", "device_image", "context", "goal"}`. One device-config suggestion for a failed health check (called by TopologyOperator's `app/fix_jobs.py`); see response shape below |
 
 `POST /api/generate-topology` response:
 
@@ -117,6 +118,27 @@ the prompts should stay inside the network, *before* them if speed matters more.
   "auto_fixes": ["Renumbered the reused interface 'gi0/1' on 'SW1' to 'gi0/2'."]
 }
 ```
+
+`POST /api/suggest-fix` response (one best-effort attempt - the caller retries
+by calling again, this endpoint never retries internally):
+
+```json
+{
+  "valid": true,
+  "warnings": [],
+  "commands": ["enable", "configure terminal", "interface GigabitEthernet0/0", "no shutdown"],
+  "explanation": "Brings the interface back up.",
+  "ollama_server_used": "gemini-flash-lite"
+}
+```
+
+`valid: false` with an `explanation` and no `commands` is a legitimate answer
+(the model decided this needs a deployment/hypervisor/wiring change, not a
+device config change) - not an error. Requires `fix_prompt_template_file` to
+be configured (default `fix_prompt_template.txt`, same directory as the other
+template files); without it the endpoint answers 503 but the rest of the
+service keeps working. Never includes a reboot/restart/power-cycle command or
+credentials (enforced by the prompt; the caller validates this again too).
 
 ### Generation from files
 
@@ -167,3 +189,5 @@ python generate_topology_cli.py \
 - `config/topology_config.yml` - server URLs, Ollama server list, timeouts
 - `config/prompt_template.txt` - the prompt sent to the LLM
 - `config/example_topology.yml` - the example format shown to the LLM
+- `config/fix_prompt_template.txt` - the prompt for `/api/suggest-fix` (optional - its absence only
+  disables that one endpoint, see the API section above)
