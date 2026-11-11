@@ -14,6 +14,7 @@ from attachment_inputs import (
     AttachmentError,
     UnsupportedAttachmentError,
     read_attachment,
+    screenshot_dimensions,
 )
 from topology_core import generate_topology, load_config, supports_attachments
 
@@ -140,6 +141,7 @@ async def generate_from_attachments(
     files: Annotated[list[UploadFile], File()],
     prompt: Annotated[str, Form()] = "",
     ollama_only: Annotated[bool, Form()] = False,
+    match_screenshot_layout: Annotated[bool, Form()] = False,
 ):
     config = CONFIG
     if config is None:
@@ -170,7 +172,12 @@ async def generate_from_attachments(
 
     try:
         return await run_in_threadpool(
-            _generate_from_uploads, prompt, config, uploads, ollama_only
+            _generate_from_uploads,
+            prompt,
+            config,
+            uploads,
+            ollama_only,
+            match_screenshot_layout,
         )
     except UnsupportedAttachmentError as exc:
         raise HTTPException(415, str(exc)) from exc
@@ -184,8 +191,29 @@ async def generate_from_attachments(
 
 
 def _generate_from_uploads(
-    prompt: str, config: dict, uploads: list[tuple[bytes, str]], ollama_only: bool
+    prompt: str,
+    config: dict,
+    uploads: list[tuple[bytes, str]],
+    ollama_only: bool,
+    match_screenshot_layout: bool = False,
 ):
+    screenshot_size = None
+    if match_screenshot_layout:
+        screenshots = [
+            upload
+            for upload in uploads
+            if upload[1].lower().endswith((".png", ".jpg", ".jpeg"))
+        ]
+        if len(screenshots) != 1:
+            raise AttachmentError(
+                "Choose exactly one PNG or JPEG screenshot to match its layout."
+            )
+        screenshot = screenshots[0]
+        screenshot_size = screenshot_dimensions(screenshot[0])
+        uploads = [
+            screenshot,
+            *(upload for upload in uploads if upload is not screenshot),
+        ]
     sections = []
     media = []
     for data, filename in uploads:
@@ -194,6 +222,9 @@ def _generate_from_uploads(
             sections.append(text)
         media.extend(parts)
     attachments = AttachmentBatch(
-        media, ollama_only=ollama_only, native_text="\n\n".join(sections)
+        media,
+        ollama_only=ollama_only,
+        native_text="\n\n".join(sections),
+        screenshot_size=screenshot_size,
     )
     return generate_topology(prompt, config, attachments=attachments)

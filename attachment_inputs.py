@@ -34,6 +34,18 @@ class AttachmentError(ValueError):
     """An uploaded document could not be used."""
 
 
+def screenshot_dimensions(data: bytes) -> tuple[int, int]:
+    try:
+        with Image.open(BytesIO(data)) as image:
+            if image.format not in {"PNG", "JPEG"}:
+                raise AttachmentError("Screenshot layout requires a PNG or JPEG image.")
+            size = image.size
+            image.verify()
+            return size
+    except (OSError, SyntaxError, Image.DecompressionBombError) as exc:
+        raise AttachmentError("Could not read the screenshot image.") from exc
+
+
 class UnsupportedAttachmentError(AttachmentError):
     """The uploaded file type is unsupported."""
 
@@ -173,6 +185,7 @@ class AttachmentBatch:
     files: list[dict[str, str]]
     ollama_only: bool = False
     native_text: str = ""
+    screenshot_size: tuple[int, int] | None = None
 
     def __post_init__(self):
         max_encoded_bytes = 4 * ((MAX_ATTACHMENT_BYTES + 2) // 3 + MAX_VISUAL_PAGES)

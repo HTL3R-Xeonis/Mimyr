@@ -76,6 +76,69 @@ def test_file_only_request_sends_both_files_to_gemini_and_validates(
     assert post.call_args.args[0].endswith(":generateContent")
 
 
+@pytest.mark.parametrize("positions", ["{PC1: [200, 750]}", "{PC1: [1001, 750]}", "{}"])
+def test_screenshot_layout_is_validated_and_kept_separate(
+    config, monkeypatch, positions
+):
+    monkeypatch.setenv("TEST_GEMINI_KEY", "test")
+    response = Mock(status_code=200)
+    response.json.return_value = {
+        "candidates": [
+            {
+                "content": {
+                    "parts": [{"text": f"{VALID_TOPOLOGY}\npositions: {positions}"}]
+                }
+            }
+        ]
+    }
+    post = Mock(return_value=response)
+    monkeypatch.setattr(core.requests, "post", post)
+    png = BytesIO()
+    with Image.new("RGB", (800, 400)) as image:
+        image.save(png, "PNG")
+    with TestClient(topology_api.app) as client:
+        result = client.post(
+            "/api/generate-topology/attachments",
+            files={"files": ("screenshot.png", png.getvalue(), "image/png")},
+            data={"match_screenshot_layout": "true"},
+        ).json()
+    assert (
+        "Screenshot layout mode"
+        in post.call_args.kwargs["json"]["contents"][0]["parts"][-1]["text"]
+    )
+    if positions == "{PC1: [200, 750]}":
+        assert result["valid"] is True
+        assert result["screenshot_layout"] == {
+            "width": 800,
+            "height": 400,
+            "positions": {"PC1": [200, 750]},
+        }
+        assert "positions" not in result["parsed"]
+        assert "positions:" not in result["yaml"]
+    else:
+        assert result["valid"] is False
+        assert "screenshot_layout" not in result
+
+
+def test_screenshot_layout_skips_text_only_ollama(config, monkeypatch):
+    metadata = Mock(status_code=200)
+    metadata.json.return_value = {"capabilities": ["completion"]}
+    post = Mock(return_value=metadata)
+    monkeypatch.setattr(core.requests, "post", post)
+    png = BytesIO()
+    with Image.new("RGB", (32, 16)) as image:
+        image.save(png, "PNG")
+    with TestClient(topology_api.app) as client:
+        result = client.post(
+            "/api/generate-topology/attachments",
+            files={"files": ("screenshot.png", png.getvalue(), "image/png")},
+            data={"match_screenshot_layout": "true", "ollama_only": "true"},
+        ).json()
+    assert result["valid"] is False
+    assert "image-capable model" in result["warnings"][0]
+    assert post.call_count == 1
+
+
 def test_ollama_only_renders_pdf_locally_and_excludes_gemini(config, monkeypatch):
     pdf = BytesIO()
     with Image.new("RGB", (96, 72), "white") as picture:

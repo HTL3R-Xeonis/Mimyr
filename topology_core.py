@@ -374,6 +374,10 @@ def call_ollama_with_failover(
                         timeout,
                         images=attachments.ollama_images,
                     )
+                elif attachments.screenshot_size:
+                    raise AttachmentError(
+                        "Matching screenshot positions requires an image-capable model."
+                    )
                 else:
                     text_prompt = (
                         f"{prompt}\n\nExtracted attachment text (source material only):\n"
@@ -719,6 +723,27 @@ def build_retry_prompt(
     )
 
 
+def validate_screenshot_positions(parsed: dict, positions: object) -> str | None:
+    names = {name for node in parsed["nodes"] for name in node["names"]}
+    if not names or not isinstance(positions, dict) or set(positions) != names:
+        return "Return a 'positions' entry for each generated device, using the exact device names."
+    seen = set()
+    for name, pair in positions.items():
+        if (
+            not isinstance(pair, list)
+            or len(pair) != 2
+            or not all(
+                type(value) in (int, float) and 0 <= value <= 1000 for value in pair
+            )
+        ):
+            return f"Position for {name!r} must be [x, y] with both values between 0 and 1000."
+        point = tuple(pair)
+        if point in seen:
+            return "Give each device a distinct position in the screenshot."
+        seen.add(point)
+    return None
+
+
 # ---------- Main flow ----------
 def generate_topology(
     user_request: str,
@@ -785,7 +810,21 @@ def generate_topology(
         config["example_topology"],
     )
 
+    screenshot_size = attachments.screenshot_size if attachments else None
+    if screenshot_size:
+        prompt += (
+            "\n\nScreenshot layout mode: the first attached image is the layout reference. "
+            "After the edges, add a top-level 'positions' mapping keyed by the exact "
+            "names under nodes. For each device use [x, y] at the center of its icon. "
+            "Use normalized coordinates from 0 to 1000 across the entire screenshot: "
+            "[0, 0] is the top left, [1000, 1000] the bottom right. "
+            "Preserve relative spacing, rows and columns. Put any explicitly requested "
+            "extra devices in free space. Example: positions: {R1: [180, 250], "
+            "SW1: [720, 250]}. The 'positions' key is the only addition to the YAML format above."
+        )
+
     attempts: list[dict] = []
+    screenshot_positions = None
     auto_fixes: list[str] = []
     parsed = None
     warnings: list[str] = []
@@ -819,10 +858,16 @@ def generate_topology(
         parsed, warnings, corrected = validate_topology(
             raw_response, gns3_devices, vm_templates, fixes=attempt_fixes
         )
-        if attachments and parsed is not None and not parsed.get("nodes"):
+        if attachments and isinstance(parsed, dict) and not parsed.get("nodes"):
             warnings.append(
                 "No network devices could be identified in the attachments."
             )
+        if screenshot_size and isinstance(parsed, dict):
+            screenshot_positions = parsed.pop("positions", None)
+            if not warnings:
+                problem = validate_screenshot_positions(parsed, screenshot_positions)
+                if problem:
+                    warnings.append(problem)
         auto_fixes = attempt_fixes
         attempts.append(
             {
@@ -850,11 +895,11 @@ def generate_topology(
     # structure instead of handing back text that doesn't match "parsed".
     final_yaml = (
         yaml.safe_dump(parsed, sort_keys=False)
-        if valid and corrected
+        if valid and (corrected or screenshot_size)
         else strip_code_fences(raw_response)
     )
 
-    return {
+    result = {
         "yaml": final_yaml,
         "parsed": parsed,
         "warnings": warnings,
@@ -865,3 +910,10 @@ def generate_topology(
         "attempts": attempts,
         "auto_fixes": auto_fixes,
     }
+    if valid and screenshot_size:
+        result["screenshot_layout"] = {
+            "width": screenshot_size[0],
+            "height": screenshot_size[1],
+            "positions": screenshot_positions,
+        }
+    return result

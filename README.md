@@ -133,6 +133,12 @@ images. Text models receive extracted text, with local Tesseract OCR for
 images and PDF pages without selectable text. OCR reads labels and text.
 Use a vision model for connections shown only as lines in a diagram.
 
+Send `match_screenshot_layout=true` with exactly one PNG or JPEG screenshot
+when device positions should follow the image. The generator requires a vision
+model for this mode. Successful responses include `screenshot_layout` with
+image `width`, `height` and `positions` keyed by device name. Each position is
+`[x, y]` in the range 0–1000 relative to the screenshot.
+
 The Ollama/OCR path accepts up to 12 pages or images per request. The Docker
 image includes English OCR data. For a native installation, install Tesseract
 with its English language data and put it on `PATH`.
