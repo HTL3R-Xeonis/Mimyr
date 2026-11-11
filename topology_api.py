@@ -2,12 +2,20 @@ from __future__ import annotations
 
 import logging
 import os
+from typing import Annotated
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+from starlette.concurrency import run_in_threadpool
 
-from topology_core import generate_topology, load_config
+from attachment_inputs import (
+    AttachmentBatch,
+    AttachmentError,
+    UnsupportedAttachmentError,
+    read_attachment,
+)
+from topology_core import generate_topology, load_config, supports_attachments
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s"
@@ -121,3 +129,71 @@ def generate(request: TopologyRequest):
         raise HTTPException(502, f"Error during generation: {e}")
 
     return result
+
+
+MAX_ATTACHMENT_COUNT = 5
+MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024
+
+
+@app.post("/api/generate-topology/attachments")
+async def generate_from_attachments(
+    files: Annotated[list[UploadFile], File()],
+    prompt: Annotated[str, Form()] = "",
+    ollama_only: Annotated[bool, Form()] = False,
+):
+    config = CONFIG
+    if config is None:
+        raise HTTPException(503, "Topology Generator configuration is unavailable.")
+    if not 1 <= len(files) <= MAX_ATTACHMENT_COUNT:
+        raise HTTPException(400, "Choose between 1 and 5 files.")
+    if not any(
+        supports_attachments(server, ollama_only=ollama_only)
+        for server in config["ollama_servers"]
+    ):
+        message = (
+            "No Ollama model is configured for file attachments."
+            if ollama_only
+            else "No Gemini or Ollama model is configured for file attachments."
+        )
+        raise HTTPException(503, message)
+
+    uploads = []
+    remaining = MAX_ATTACHMENT_BYTES
+    for upload in files:
+        data = await upload.read(remaining + 1)
+        remaining -= len(data)
+        if remaining < 0:
+            raise HTTPException(413, "Attachments may total at most 10 MiB.")
+        if not data:
+            raise HTTPException(400, "Attachments must not be empty.")
+        uploads.append((data, upload.filename or ""))
+
+    try:
+        return await run_in_threadpool(
+            _generate_from_uploads, prompt, config, uploads, ollama_only
+        )
+    except UnsupportedAttachmentError as exc:
+        raise HTTPException(415, str(exc)) from exc
+    except AttachmentError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except Exception as exc:
+        log.error("Attachment generation failed (%s)", type(exc).__name__)
+        raise HTTPException(
+            502, "Topology generation from attachments failed."
+        ) from exc
+
+
+def _generate_from_uploads(
+    prompt: str, config: dict, uploads: list[tuple[bytes, str]], ollama_only: bool
+):
+    sections = []
+    media = []
+    for data, filename in uploads:
+        text, parts = read_attachment(data, filename)
+        if text:
+            sections.append(text)
+        media.extend(parts)
+    attachments = AttachmentBatch(
+        media, ollama_only=ollama_only, native_text="\n\n".join(sections)
+    )
+    return generate_topology(prompt, config, attachments=attachments)

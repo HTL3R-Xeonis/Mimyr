@@ -118,6 +118,27 @@ the prompts should stay inside the network, *before* them if speed matters more.
 }
 ```
 
+### Generation from files
+
+Send a multipart request to `POST /api/generate-topology/attachments` with
+repeated `files` fields and an optional `prompt`. It returns the same validated
+topology response as the text endpoint. It accepts PDF, PNG, JPEG, Word (`.docx`),
+TXT, Markdown and CSV (up to 5 files and 10 MiB total). Text files use UTF-8.
+
+The generator tries models in the configured order. Gemini entries using the
+Google API receive PDFs and images. Word paragraphs and tables are extracted,
+and embedded PNG and JPEG images are included. For Ollama the generator checks
+the model's `vision` capability via `/api/show`. Vision models receive PDF page
+images. Text models receive extracted text, with local Tesseract OCR for
+images and PDF pages without selectable text. OCR reads labels and text.
+Use a vision model for connections shown only as lines in a diagram.
+
+The Ollama/OCR path accepts up to 12 pages or images per request. The Docker
+image includes German and English OCR data. For a native installation, install
+Tesseract and put it on `PATH`. Set `OCR_LANGUAGES` to override `deu+eng`.
+Set `vision: true` or `vision: false` on an Ollama server entry to override
+capability discovery. Pass `ollama_only=true` to exclude Gemini for this request.
+
 ## CLI
 
 For generating a topology file without going through the API:
@@ -136,7 +157,7 @@ python generate_topology_cli.py \
 - `generate_topology_cli.py` - standalone CLI wrapper around it
 - `tests/test_topology_core.py` - validation, auto-repair and retry-feedback tests
   (`python -m pytest tests`; pytest is not in `requirements.txt`, and the
-  Docker image ships only `topology_core.py` and `topology_api.py`)
+  Docker image ships the runtime modules)
 - `config/topology_config.yml` - server URLs, Ollama server list, timeouts
 - `config/prompt_template.txt` - the prompt sent to the LLM
 - `config/example_topology.yml` - the example format shown to the LLM
