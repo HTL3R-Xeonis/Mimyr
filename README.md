@@ -132,13 +132,15 @@ by calling again, this endpoint never retries internally):
 }
 ```
 
-`valid: false` with an `explanation` and no `commands` is a legitimate answer
-(the model decided this needs a deployment/hypervisor/wiring change, not a
-device config change) - not an error. Requires `fix_prompt_template_file` to
-be configured (default `fix_prompt_template.txt`, same directory as the other
-template files); without it the endpoint answers 503 but the rest of the
-service keeps working. Never includes a reboot/restart/power-cycle command or
-credentials (enforced by the prompt; the caller validates this again too).
+`valid: false` with an `explanation` and no `commands` is legitimate advice for
+a deployment, hypervisor or wiring change. A malformed reply instead returns
+`valid: false`, an empty explanation and command list, and a warning so the
+Operator can retry. The Generator rejects the whole suggestion when the
+model returns a non-boolean status, invalid command lines or an oversized
+list. The prompt asks the model to omit credentials and disruptive commands;
+review every suggestion before use. The endpoint requires
+`fix_prompt_template_file` (default `fix_prompt_template.txt`); without it
+the endpoint answers 503 and topology generation still works.
 
 ### Generation from files
 

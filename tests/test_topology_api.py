@@ -6,6 +6,8 @@ from unittest.mock import patch
 import pytest
 from fastapi.testclient import TestClient
 
+import topology_core
+
 
 @pytest.fixture
 def api(monkeypatch, tmp_path):
@@ -71,6 +73,21 @@ def test_suggest_fix_returns_the_parsed_reply(api):
     assert response.status_code == 200
     assert response.json() == reply
     fake.assert_called_once_with("ROUTER", "Cisco IOSv", "ctx", "goal", api.CONFIG)
+
+
+def test_suggest_fix_rejects_model_commands_when_the_status_is_a_string(api):
+    api.CONFIG = {"ollama_servers": [{"name": "a"}], "fix_prompt_template": "x"}
+    raw = '{"valid":"false","commands":["show version"],"explanation":"why"}'
+    with patch.object(
+        topology_core, "call_ollama_with_failover", return_value=(raw, "a")
+    ):
+        response = TestClient(api.app).post("/api/suggest-fix", json=FIX_BODY)
+    assert response.status_code == 200
+    reply = response.json()
+    assert reply["valid"] is False
+    assert reply["commands"] == []
+    assert reply["explanation"] == ""
+    assert "JSON boolean" in reply["warnings"][0]
 
 
 def test_suggest_fix_maps_a_value_error_to_503(api):

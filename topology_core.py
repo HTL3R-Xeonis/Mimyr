@@ -935,6 +935,10 @@ def generate_topology(
 # ---------- Health-check fix suggestions ----------
 _MAX_FIX_WARNINGS = 20
 _MAX_FIX_COMMANDS = 100
+_MAX_FIX_WARNING_LENGTH = 1000
+_MAX_FIX_COMMAND_LENGTH = 4000
+_MAX_FIX_EXPLANATION_LENGTH = 4000
+_FIX_PUSH_DIRECTIVE = re.compile(r"^@(reboot|wait-reboot)(?:\s+\d+)?$", re.IGNORECASE)
 
 
 def build_fix_prompt(
@@ -957,8 +961,9 @@ def parse_fix_reply(raw_response: str) -> dict:
     Parses the LLM's JSON reply into the flat {valid, warnings, commands,
     explanation} shape the Operator's own FixReply model expects (see
     TopologyOperator's app/fix_jobs.py).
-    :raises ValueError: not valid JSON.
-    :raises TypeError: not a JSON object, or 'warnings'/'commands' are not lists.
+    Reject incomplete command sequences rather than guessing what the model meant.
+    :raises ValueError: invalid JSON or an incomplete or unsupported suggestion.
+    :raises TypeError: invalid field types.
     """
     text = strip_code_fences(raw_response)
     try:
@@ -968,18 +973,44 @@ def parse_fix_reply(raw_response: str) -> dict:
     if not isinstance(data, dict):
         raise TypeError("response is not a JSON object")
 
-    warnings = data.get("warnings") or []
-    commands = data.get("commands") or []
-    if not isinstance(warnings, list) or not isinstance(commands, list):
-        raise TypeError("'warnings'/'commands' must be lists")
+    valid = data.get("valid")
+    if not isinstance(valid, bool):
+        raise TypeError("'valid' must be a JSON boolean")
+    warnings = data.get("warnings", [])
+    commands = data.get("commands", [])
+    explanation = data.get("explanation")
+    if not isinstance(explanation, str):
+        raise TypeError("'explanation' must be a string")
+    if not isinstance(warnings, list) or any(not isinstance(w, str) for w in warnings):
+        raise TypeError("'warnings' must be a list of strings")
+    if not isinstance(commands, list) or any(not isinstance(c, str) for c in commands):
+        raise TypeError("'commands' must be a list of strings")
+    if not explanation.strip() or len(explanation) > _MAX_FIX_EXPLANATION_LENGTH:
+        raise ValueError("'explanation' must be nonempty and at most 4000 characters")
+    if len(warnings) > _MAX_FIX_WARNINGS or any(
+        len(w) > _MAX_FIX_WARNING_LENGTH for w in warnings
+    ):
+        raise ValueError("'warnings' exceed the response limits")
+    if valid != bool(commands):
+        raise ValueError(
+            "A valid suggestion needs commands; advice must not include any"
+        )
+    if len(commands) > _MAX_FIX_COMMANDS or any(
+        not c.strip()
+        or len(c) > _MAX_FIX_COMMAND_LENGTH
+        or not c.isprintable()
+        or _FIX_PUSH_DIRECTIVE.fullmatch(c.strip())
+        for c in commands
+    ):
+        raise ValueError(
+            "'commands' contain invalid lines or unsupported push directives"
+        )
 
     return {
-        "valid": bool(data.get("valid")),
-        "warnings": [str(w) for w in warnings][:_MAX_FIX_WARNINGS],
-        "commands": [str(c) for c in commands if isinstance(c, str)][
-            :_MAX_FIX_COMMANDS
-        ],
-        "explanation": str(data.get("explanation") or ""),
+        "valid": valid,
+        "warnings": warnings,
+        "commands": commands,
+        "explanation": explanation.strip(),
     }
 
 

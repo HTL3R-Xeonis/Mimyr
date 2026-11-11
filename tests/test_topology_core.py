@@ -421,17 +421,37 @@ def test_parse_fix_reply_accepts_a_fenced_json_object():
     }
 
 
-def test_parse_fix_reply_caps_warnings_and_commands_and_drops_non_strings():
-    data = {
-        "valid": False,
-        "warnings": ["w"] * 25,
-        "commands": ["c"] * 150 + [42],
-        "explanation": "e",
-    }
-    reply = tc.parse_fix_reply(json.dumps(data))
-    assert len(reply["warnings"]) == 20
-    assert len(reply["commands"]) == 100
-    assert all(c == "c" for c in reply["commands"])
+def test_parse_fix_reply_accepts_advice_without_commands():
+    reply = tc.parse_fix_reply(
+        '{"valid": false, "commands": [], "explanation": "Restore the link in GNS3."}'
+    )
+    assert reply["valid"] is False
+    assert reply["commands"] == []
+    assert reply["explanation"] == "Restore the link in GNS3."
+
+
+@pytest.mark.parametrize(
+    ("change", "error", "message"),
+    [
+        ({"valid": "false"}, TypeError, "JSON boolean"),
+        ({"valid": 1}, TypeError, "JSON boolean"),
+        ({"warnings": [42]}, TypeError, "list of strings"),
+        ({"warnings": ["w"] * 21}, ValueError, "response limits"),
+        ({"commands": ["show version", 42]}, TypeError, "list of strings"),
+        ({"commands": ["show version"] * 101}, ValueError, "invalid lines"),
+        ({"commands": ["show version\nshow interfaces"]}, ValueError, "invalid lines"),
+        ({"commands": ["@WAIT-REBOOT 30"]}, ValueError, "unsupported push directives"),
+        ({"commands": []}, ValueError, "needs commands"),
+        ({"valid": False}, ValueError, "must not include"),
+        ({"explanation": " "}, ValueError, "nonempty"),
+    ],
+)
+def test_parse_fix_reply_rejects_the_entire_malformed_suggestion(
+    change, error, message
+):
+    data = {"valid": True, "commands": ["show version"], "explanation": "why", **change}
+    with pytest.raises(error, match=message):
+        tc.parse_fix_reply(json.dumps(data))
 
 
 def test_parse_fix_reply_rejects_non_json():
@@ -458,10 +478,15 @@ def test_suggest_fix_sends_the_built_prompt_and_returns_the_parsed_reply():
     assert result["ollama_server_used"] == "fake"
 
 
-def test_suggest_fix_turns_a_malformed_reply_into_an_invalid_result_not_a_crash():
-    with patch.object(
-        tc, "call_ollama_with_failover", return_value=("not json", "fake")
-    ):
+@pytest.mark.parametrize(
+    "text",
+    [
+        "not json",
+        '{"valid": "false", "commands": ["show version"], "explanation": "why"}',
+    ],
+)
+def test_suggest_fix_turns_a_malformed_reply_into_an_invalid_result_not_a_crash(text):
+    with patch.object(tc, "call_ollama_with_failover", return_value=(text, "fake")):
         result = tc.suggest_fix("ROUTER", "Cisco IOSv", "ctx", "", _fix_config())
 
     assert result["valid"] is False
