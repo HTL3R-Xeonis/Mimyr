@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import subprocess
 from base64 import b64decode, b64encode
 from contextlib import closing
@@ -128,7 +127,7 @@ def _recognize_text(image: bytes) -> str:
                     "stdin",
                     "stdout",
                     "-l",
-                    os.getenv("OCR_LANGUAGES", "deu+eng"),
+                    "eng",
                     "--psm",
                     "11",
                 ],

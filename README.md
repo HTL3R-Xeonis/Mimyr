@@ -134,8 +134,8 @@ images and PDF pages without selectable text. OCR reads labels and text.
 Use a vision model for connections shown only as lines in a diagram.
 
 The Ollama/OCR path accepts up to 12 pages or images per request. The Docker
-image includes German and English OCR data. For a native installation, install
-Tesseract and put it on `PATH`. Set `OCR_LANGUAGES` to override `deu+eng`.
+image includes English OCR data. For a native installation, install Tesseract
+with its English language data and put it on `PATH`.
 Set `vision: true` or `vision: false` on an Ollama server entry to override
 capability discovery. Pass `ollama_only=true` to exclude Gemini for this request.
 

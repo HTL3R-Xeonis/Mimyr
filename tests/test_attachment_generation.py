@@ -127,7 +127,15 @@ def test_ollama_text_model_uses_local_ocr(config, monkeypatch):
     assert response.status_code == 200
     assert response.json()["valid"] is True
     ocr.assert_called_once()
-    assert ocr.call_args.args[0][:3] == ["tesseract", "stdin", "stdout"]
+    assert ocr.call_args.args[0] == [
+        "tesseract",
+        "stdin",
+        "stdout",
+        "-l",
+        "eng",
+        "--psm",
+        "11",
+    ]
     payload = post.call_args.kwargs["json"]
     assert "PC1 connected to SW1" in payload["prompt"]
     assert "images" not in payload
