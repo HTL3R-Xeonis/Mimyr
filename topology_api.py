@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Annotated
+from secrets import compare_digest
+from typing import Annotated, Literal
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
 from attachment_inputs import (
@@ -17,6 +18,7 @@ from attachment_inputs import (
     screenshot_dimensions,
 )
 from topology_core import (
+    generate_snippet_settings,
     generate_topology,
     load_config,
     suggest_fix,
@@ -57,6 +59,11 @@ class FixSuggestionRequest(BaseModel):
     device_image: str
     context: str
     goal: str
+
+
+class SnippetSettingsRequest(BaseModel):
+    topic: Literal["vlan", "interface_description"]
+    prompt: str = Field(min_length=1, max_length=1500)
 
 
 @app.get("/")
@@ -151,6 +158,10 @@ def suggest_fix_endpoint(request: FixSuggestionRequest):
     see topology_core.suggest_fix's own docstring. The caller (TopologyOperator's
     app/fix_jobs.py) retries by calling this again; a single call here never retries.
     """
+    if os.environ.get("XEONIS_CLASSROOM_MODE") == "1":
+        raise HTTPException(
+            403, "Health-check fix suggestions are disabled in classroom mode."
+        )
     if CONFIG is None:
         raise HTTPException(500, f"Could not load config: {CONFIG_ERROR}")
     if CONFIG.get("fix_prompt_template") is None:
@@ -174,6 +185,36 @@ def suggest_fix_endpoint(request: FixSuggestionRequest):
     except Exception as e:
         log.exception("Error during fix suggestion")
         raise HTTPException(502, f"Error during fix suggestion: {e}")
+
+
+@app.post("/api/config-snippets/generate")
+def generate_config_snippet_settings(
+    request: SnippetSettingsRequest,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict:
+    token = os.environ.get("XEONIS_AI_SNIPPETS_TOKEN", "")
+    if (
+        len(token) < 32
+        or not token.isascii()
+        or not token.isprintable()
+        or " " in token
+        or not compare_digest(
+            (authorization or "").encode(), f"Bearer {token}".encode()
+        )
+    ):
+        raise HTTPException(403, "Snippet generation requires service authorization.")
+    if CONFIG is None:
+        raise HTTPException(503, "Generator configuration is unavailable.")
+    if not request.prompt.strip():
+        raise HTTPException(422, "Enter a prompt.")
+    try:
+        return generate_snippet_settings(request.topic, request.prompt.strip(), CONFIG)
+    except ValueError as exc:
+        raise HTTPException(
+            422, "The prompt did not yield settings for the selected exercise."
+        ) from exc
+    except RuntimeError as exc:
+        raise HTTPException(502, "The model service is unavailable.") from exc
 
 
 MAX_ATTACHMENT_COUNT = 5

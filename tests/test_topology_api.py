@@ -102,3 +102,47 @@ def test_suggest_fix_maps_an_unexpected_error_to_502(api):
     with patch.object(api, "suggest_fix", side_effect=RuntimeError("all servers down")):
         response = TestClient(api.app).post("/api/suggest-fix", json=FIX_BODY)
     assert response.status_code == 502
+
+
+def test_config_snippet_endpoint_requires_service_token(api, monkeypatch):
+    monkeypatch.setenv("XEONIS_AI_SNIPPETS_TOKEN", "t" * 32)
+    client = TestClient(api.app)
+    url = "/api/config-snippets/generate"
+    body = {"topic": "vlan", "prompt": "VLAN 30 Lab"}
+    api.CONFIG = {"ollama_servers": []}
+    with patch.object(
+        topology_core,
+        "call_ollama_with_failover",
+        return_value=('{"vlan_id":30,"name":"Lab"}', "test"),
+    ) as model:
+        assert client.post(url, json=body).status_code == 403
+        model.assert_not_called()
+        response = client.post(
+            url, json=body, headers={"Authorization": "Bearer " + "t" * 32}
+        )
+    assert response.status_code == 200
+    assert response.json() == {"vlan_id": 30, "name": "Lab"}
+    assert "VLAN 30 Lab" in model.call_args.args[0]
+
+
+def test_config_snippet_rejects_a_model_command_list(api, monkeypatch):
+    monkeypatch.setenv("XEONIS_AI_SNIPPETS_TOKEN", "t" * 32)
+    api.CONFIG = {"ollama_servers": []}
+    with patch.object(
+        topology_core,
+        "call_ollama_with_failover",
+        return_value=('{"commands":["show version"]}', "test"),
+    ):
+        response = TestClient(api.app).post(
+            "/api/config-snippets/generate",
+            json={"topic": "vlan", "prompt": "VLAN 30"},
+            headers={"Authorization": "Bearer " + "t" * 32},
+        )
+    assert response.status_code == 422
+
+
+def test_classroom_mode_disables_the_older_fix_route(api, monkeypatch):
+    monkeypatch.setenv("XEONIS_CLASSROOM_MODE", "1")
+    assert (
+        TestClient(api.app).post("/api/suggest-fix", json=FIX_BODY).status_code == 403
+    )

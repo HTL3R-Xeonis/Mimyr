@@ -142,6 +142,14 @@ review every suggestion before use. The endpoint requires
 `fix_prompt_template_file` (default `fix_prompt_template.txt`); without it
 the endpoint answers 503 and topology generation still works.
 
+### AI config snippets
+
+`POST /api/config-snippets/generate` takes a `topic` (`vlan` or `interface_description`) and a `prompt`.
+It requires the Operator's `XEONIS_AI_SNIPPETS_TOKEN` as a bearer credential. The response contains
+structured exercise settings. The Operator validates those fields, builds the Cisco IOS commands,
+and presents a draft. `XEONIS_CLASSROOM_MODE=1` disables the older general-purpose
+`/api/suggest-fix` endpoint on this instance.
+
 ### Generation from files
 
 Send a multipart request to `POST /api/generate-topology/attachments` with
