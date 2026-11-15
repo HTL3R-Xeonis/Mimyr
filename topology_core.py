@@ -63,6 +63,18 @@ def load_config(config_path: str) -> dict:
         else None
     )
 
+    # Optional, same reasoning as fix_prompt_template above - only
+    # /api/summarize-text reports it is unavailable.
+    summary_prompt_file = config.get(
+        "summary_prompt_template_file", "summary_prompt_template.txt"
+    )
+    summary_prompt_path = base_dir / summary_prompt_file
+    config["summary_prompt_template"] = (
+        summary_prompt_path.read_text(encoding="utf-8")
+        if summary_prompt_path.exists()
+        else None
+    )
+
     config.setdefault("ollama_servers", [])
     config.setdefault("max_retries", 3)
     config.setdefault("request_timeout", 300)
@@ -1050,6 +1062,35 @@ def suggest_fix(
         }
     reply["ollama_server_used"] = used_server
     return reply
+
+
+def build_summary_prompt(text: str, goal: str, summary_prompt_template: str) -> str:
+    return summary_prompt_template.format(
+        text=text.strip(),
+        goal=goal.strip() or "Summarize this text.",
+    )
+
+
+def summarize_text(text: str, goal: str, config: dict) -> dict:
+    """
+    One best-effort text summary (used by TopologyOperator's admin panel to
+    summarize its own log). No retry of its own, same reasoning as
+    suggest_fix - the caller retries by calling this again if it wants to.
+    :raises ValueError: no summary prompt template is configured (see
+        load_config's summary_prompt_template_file).
+    :raises RuntimeError: every configured LLM server failed (see
+        call_ollama_with_failover).
+    """
+    summary_prompt_template = config.get("summary_prompt_template")
+    if not summary_prompt_template:
+        raise ValueError(
+            "No summary prompt template is configured (summary_prompt_template_file)."
+        )
+    prompt = build_summary_prompt(text, goal, summary_prompt_template)
+    raw_response, used_server = call_ollama_with_failover(
+        prompt, config["ollama_servers"], config.get("request_timeout", 300)
+    )
+    return {"summary": raw_response.strip(), "ollama_server_used": used_server}
 
 
 _SNIPPET_EXERCISES = {

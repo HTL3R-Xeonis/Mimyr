@@ -509,3 +509,52 @@ def test_suggest_fix_propagates_a_total_failover_failure():
         pytest.raises(RuntimeError, match="all down"),
     ):
         tc.suggest_fix("ROUTER", "Cisco IOSv", "ctx", "goal", _fix_config())
+
+
+# ---------- Text summaries ----------
+
+SUMMARY_TEMPLATE = "TEXT={text} GOAL={goal}"
+
+
+def _summary_config(summary_prompt_template=SUMMARY_TEMPLATE):
+    return {
+        "ollama_servers": [{"name": "fake", "url": "u", "model": "m"}],
+        "request_timeout": 1,
+        "summary_prompt_template": summary_prompt_template,
+    }
+
+
+def test_build_summary_prompt_fills_every_placeholder():
+    prompt = tc.build_summary_prompt(" some log text ", " goal ", SUMMARY_TEMPLATE)
+    assert prompt == "TEXT=some log text GOAL=goal"
+
+
+def test_build_summary_prompt_defaults_an_empty_goal():
+    prompt = tc.build_summary_prompt("text", "   ", SUMMARY_TEMPLATE)
+    assert "GOAL=Summarize this text." in prompt
+
+
+def test_summarize_text_sends_the_built_prompt_and_returns_the_summary():
+    with patch.object(
+        tc, "call_ollama_with_failover", return_value=("  a short summary  ", "fake")
+    ) as fake_call:
+        result = tc.summarize_text("some log text", "goal", _summary_config())
+
+    prompt = fake_call.call_args.args[0]
+    assert "TEXT=some log text" in prompt and "GOAL=goal" in prompt
+    assert result == {"summary": "a short summary", "ollama_server_used": "fake"}
+
+
+def test_summarize_text_raises_without_a_configured_template():
+    with pytest.raises(ValueError, match="summary prompt template"):
+        tc.summarize_text("text", "goal", _summary_config(summary_prompt_template=None))
+
+
+def test_summarize_text_propagates_a_total_failover_failure():
+    with (
+        patch.object(
+            tc, "call_ollama_with_failover", side_effect=RuntimeError("all down")
+        ),
+        pytest.raises(RuntimeError, match="all down"),
+    ):
+        tc.summarize_text("text", "goal", _summary_config())

@@ -22,6 +22,7 @@ from topology_core import (
     generate_topology,
     load_config,
     suggest_fix,
+    summarize_text,
     supports_attachments,
 )
 
@@ -59,6 +60,11 @@ class FixSuggestionRequest(BaseModel):
     device_image: str
     context: str
     goal: str
+
+
+class SummarizeTextRequest(BaseModel):
+    text: str
+    goal: str = ""
 
 
 class SnippetSettingsRequest(BaseModel):
@@ -185,6 +191,32 @@ def suggest_fix_endpoint(request: FixSuggestionRequest):
     except Exception as e:
         log.exception("Error during fix suggestion")
         raise HTTPException(502, f"Error during fix suggestion: {e}")
+
+
+@app.post("/api/summarize-text")
+def summarize_text_endpoint(request: SummarizeTextRequest):
+    """
+    One best-effort text summary - see topology_core.summarize_text's own
+    docstring. The caller (TopologyOperator's app/log_summary.py, for its
+    admin panel's log summary) does not retry; a single call here never
+    retries either.
+    """
+    if CONFIG is None:
+        raise HTTPException(500, f"Could not load config: {CONFIG_ERROR}")
+    if CONFIG.get("summary_prompt_template") is None:
+        raise HTTPException(
+            503,
+            "This Topology Generator has no summary_prompt_template_file configured.",
+        )
+    if not request.text.strip():
+        raise HTTPException(400, "'text' must not be empty.")
+    try:
+        return summarize_text(request.text, request.goal, CONFIG)
+    except ValueError as e:
+        raise HTTPException(503, str(e))
+    except Exception as e:
+        log.exception("Error during text summarization")
+        raise HTTPException(502, f"Error during text summarization: {e}")
 
 
 @app.post("/api/config-snippets/generate")

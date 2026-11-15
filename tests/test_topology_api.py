@@ -104,6 +104,54 @@ def test_suggest_fix_maps_an_unexpected_error_to_502(api):
     assert response.status_code == 502
 
 
+SUMMARY_BODY = {"text": "some log text", "goal": "goal"}
+
+
+def test_summarize_text_500s_without_a_loaded_config(api):
+    response = TestClient(api.app).post("/api/summarize-text", json=SUMMARY_BODY)
+    assert response.status_code == 500
+
+
+def test_summarize_text_503s_without_a_configured_summary_template(api):
+    api.CONFIG = {"ollama_servers": [{"name": "a"}], "summary_prompt_template": None}
+    response = TestClient(api.app).post("/api/summarize-text", json=SUMMARY_BODY)
+    assert response.status_code == 503
+
+
+def test_summarize_text_400s_for_empty_text(api):
+    api.CONFIG = {"ollama_servers": [{"name": "a"}], "summary_prompt_template": "x"}
+    response = TestClient(api.app).post(
+        "/api/summarize-text", json={**SUMMARY_BODY, "text": "  "}
+    )
+    assert response.status_code == 400
+
+
+def test_summarize_text_returns_the_summary(api):
+    api.CONFIG = {"ollama_servers": [{"name": "a"}], "summary_prompt_template": "x"}
+    reply = {"summary": "a short summary", "ollama_server_used": "a"}
+    with patch.object(api, "summarize_text", return_value=reply) as fake:
+        response = TestClient(api.app).post("/api/summarize-text", json=SUMMARY_BODY)
+    assert response.status_code == 200
+    assert response.json() == reply
+    fake.assert_called_once_with("some log text", "goal", api.CONFIG)
+
+
+def test_summarize_text_maps_a_value_error_to_503(api):
+    api.CONFIG = {"ollama_servers": [{"name": "a"}], "summary_prompt_template": "x"}
+    with patch.object(api, "summarize_text", side_effect=ValueError("no template")):
+        response = TestClient(api.app).post("/api/summarize-text", json=SUMMARY_BODY)
+    assert response.status_code == 503
+
+
+def test_summarize_text_maps_an_unexpected_error_to_502(api):
+    api.CONFIG = {"ollama_servers": [{"name": "a"}], "summary_prompt_template": "x"}
+    with patch.object(
+        api, "summarize_text", side_effect=RuntimeError("all servers down")
+    ):
+        response = TestClient(api.app).post("/api/summarize-text", json=SUMMARY_BODY)
+    assert response.status_code == 502
+
+
 def test_config_snippet_endpoint_requires_service_token(api, monkeypatch):
     monkeypatch.setenv("XEONIS_AI_SNIPPETS_TOKEN", "t" * 32)
     client = TestClient(api.app)

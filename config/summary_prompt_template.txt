@@ -1,0 +1,12 @@
+You are a helpful assistant summarizing a log file for an operator.
+
+Log text:
+{text}
+
+What the summary should focus on: {goal}
+
+Write a short, plain-language summary of the log above. Call out errors and
+warnings first, then note anything else worth knowing. If the log shows no
+errors or warnings, say that plainly instead of inventing problems that are
+not there. Respond with plain text only - no JSON, no markdown formatting,
+no headings.

@@ -102,6 +102,7 @@ the prompts should stay inside the network, *before* them if speed matters more.
 | `POST /api/reload-config` | Reloads the config files without restarting the container |
 | `POST /api/generate-topology` | Body: `{"prompt": "..."}`. Generates a topology; see response shape below |
 | `POST /api/suggest-fix` | Body: `{"device_role", "device_image", "context", "goal"}`. One device-config suggestion for a failed health check (called by TopologyOperator's `app/fix_jobs.py`); see response shape below |
+| `POST /api/summarize-text` | Body: `{"text", "goal"}`. One best-effort plain-text summary of arbitrary text (called by TopologyOperator's admin panel to summarize its own log, `app/log_summary.py`); see response shape below |
 
 `POST /api/generate-topology` response:
 
@@ -141,6 +142,20 @@ list. The prompt asks the model to omit credentials and disruptive commands;
 review every suggestion before use. The endpoint requires
 `fix_prompt_template_file` (default `fix_prompt_template.txt`); without it
 the endpoint answers 503 and topology generation still works.
+
+`POST /api/summarize-text` response:
+
+```json
+{
+  "summary": "No errors or warnings in this period. ...",
+  "ollama_server_used": "gemini-flash-lite"
+}
+```
+
+Same one-best-effort-attempt shape as `/api/suggest-fix` - the caller
+retries by calling again. Requires `summary_prompt_template_file` (default
+`summary_prompt_template.txt`); without it the endpoint answers 503 and
+everything else still works.
 
 ### AI config snippets
 
@@ -201,3 +216,5 @@ python generate_topology_cli.py \
 - `config/example_topology.yml` - the example format shown to the LLM
 - `config/fix_prompt_template.txt` - the prompt for `/api/suggest-fix` (optional - its absence only
   disables that one endpoint, see the API section above)
+- `config/summary_prompt_template.txt` - the prompt for `/api/summarize-text` (optional, same
+  reasoning as `fix_prompt_template.txt` above)
