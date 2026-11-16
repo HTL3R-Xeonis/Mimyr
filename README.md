@@ -159,11 +159,15 @@ everything else still works.
 
 ### AI config snippets
 
-`POST /api/config-snippets/generate` takes a `topic` (`vlan` or `interface_description`) and a `prompt`.
-It requires the Operator's `XEONIS_AI_SNIPPETS_TOKEN` as a bearer credential. The response contains
-structured exercise settings. The Operator validates those fields, builds the Cisco IOS commands,
-and presents a draft. `XEONIS_CLASSROOM_MODE=1` disables the older general-purpose
-`/api/suggest-fix` endpoint on this instance.
+The Operator uses `POST /api/config-draft` with a prompt and context for one device
+(role, image, IOS platform, interfaces and neighbors). The response is a list of
+structured VLAN, access-port, interface-description or IPv4 settings. The Operator
+validates the settings and displays the resulting IOS commands for review.
+
+Both `/api/config-draft` and the legacy `/api/config-snippets/generate` endpoint
+require the Operator's `XEONIS_AI_SNIPPETS_TOKEN` as a bearer credential.
+`XEONIS_CLASSROOM_MODE=1` disables the older general-purpose `/api/suggest-fix`
+endpoint on this instance.
 
 ### Generation from files
 

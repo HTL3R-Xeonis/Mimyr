@@ -7,7 +7,7 @@ from typing import Annotated, Literal
 
 from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from starlette.concurrency import run_in_threadpool
 
 from attachment_inputs import (
@@ -18,6 +18,7 @@ from attachment_inputs import (
     screenshot_dimensions,
 )
 from topology_core import (
+    generate_config_draft,
     generate_snippet_settings,
     generate_topology,
     load_config,
@@ -219,11 +220,7 @@ def summarize_text_endpoint(request: SummarizeTextRequest):
         raise HTTPException(502, f"Error during text summarization: {e}")
 
 
-@app.post("/api/config-snippets/generate")
-def generate_config_snippet_settings(
-    request: SnippetSettingsRequest,
-    authorization: Annotated[str | None, Header()] = None,
-) -> dict:
+def _require_snippet_token(authorization: str | None) -> None:
     token = os.environ.get("XEONIS_AI_SNIPPETS_TOKEN", "")
     if (
         len(token) < 32
@@ -235,6 +232,14 @@ def generate_config_snippet_settings(
         )
     ):
         raise HTTPException(403, "Snippet generation requires service authorization.")
+
+
+@app.post("/api/config-snippets/generate")
+def generate_config_snippet_settings(
+    request: SnippetSettingsRequest,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict:
+    _require_snippet_token(authorization)
     if CONFIG is None:
         raise HTTPException(503, "Generator configuration is unavailable.")
     if not request.prompt.strip():
@@ -244,6 +249,53 @@ def generate_config_snippet_settings(
     except ValueError as exc:
         raise HTTPException(
             422, "The prompt did not yield settings for the selected exercise."
+        ) from exc
+    except RuntimeError as exc:
+        raise HTTPException(502, "The model service is unavailable.") from exc
+
+
+class ConfigLink(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    port: str = Field(max_length=200)
+    neighbor: str = Field(max_length=200)
+    neighbor_port: str = Field(max_length=200)
+
+
+ConfigPort = Annotated[str, Field(max_length=200)]
+
+
+class ConfigContext(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    device: str = Field(max_length=200)
+    role: str = Field(max_length=100)
+    image: str = Field(max_length=300)
+    platform: Literal["iosv", "iosvl2"]
+    ports: list[ConfigPort] = Field(max_length=100)
+    links: list[ConfigLink] = Field(max_length=100)
+
+
+class ConfigDraftRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    prompt: str = Field(min_length=1, max_length=1500)
+    context: ConfigContext
+
+
+@app.post("/api/config-draft")
+def generate_config_draft_endpoint(
+    request: ConfigDraftRequest,
+    authorization: Annotated[str | None, Header()] = None,
+) -> list[dict]:
+    _require_snippet_token(authorization)
+    if CONFIG is None:
+        raise HTTPException(503, "Generator configuration is unavailable.")
+    prompt = request.prompt.strip()
+    if not prompt:
+        raise HTTPException(422, "Enter a prompt.")
+    try:
+        return generate_config_draft(prompt, request.context.model_dump(), CONFIG)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(
+            422, "The prompt did not yield supported configuration settings."
         ) from exc
     except RuntimeError as exc:
         raise HTTPException(502, "The model service is unavailable.") from exc

@@ -194,3 +194,56 @@ def test_classroom_mode_disables_the_older_fix_route(api, monkeypatch):
     assert (
         TestClient(api.app).post("/api/suggest-fix", json=FIX_BODY).status_code == 403
     )
+
+
+@pytest.mark.parametrize(
+    ("reply", "expected"),
+    [
+        (
+            '[{"kind":"description","interface":"GigabitEthernet0/1","description":"To R1"}]',
+            200,
+        ),
+        ('["configure terminal", "reload"]', 422),
+        ('[{"kind":"ipv4","interface":"GigabitEthernet0/1","address":true}]', 422),
+        ("[]", 422),
+    ],
+)
+def test_config_draft_uses_token_and_passes_device_context(
+    api, monkeypatch, reply, expected
+):
+    token = "d" * 32
+    monkeypatch.setenv("XEONIS_AI_SNIPPETS_TOKEN", token)
+    api.CONFIG = {"ollama_servers": [{"name": "a"}]}
+    client = TestClient(api.app)
+    body = {
+        "prompt": "Describe the port to R1",
+        "context": {
+            "device": "SW1",
+            "role": "SWITCH",
+            "image": "Cisco IOSvL2",
+            "platform": "iosvl2",
+            "ports": ["GigabitEthernet0/1"],
+            "links": [
+                {
+                    "port": "GigabitEthernet0/1",
+                    "neighbor": "R1",
+                    "neighbor_port": "Gi0/0",
+                }
+            ],
+        },
+    }
+    with patch.object(
+        topology_core, "call_ollama_with_failover", return_value=(reply, "a")
+    ) as model:
+        assert client.post("/api/config-draft", json=body).status_code == 403
+        model.assert_not_called()
+        response = client.post(
+            "/api/config-draft", json=body, headers={"Authorization": f"Bearer {token}"}
+        )
+    assert response.status_code == expected
+    prompt = model.call_args.args[0]
+    assert "Describe the port to R1" in prompt
+    assert '"ports": ["GigabitEthernet0/1"]' in prompt
+    assert '"neighbor": "R1"' in prompt
+    if expected == 200:
+        assert response.json()[0]["description"] == "To R1"
