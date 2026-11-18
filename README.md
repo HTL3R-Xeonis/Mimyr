@@ -160,9 +160,12 @@ everything else still works.
 ### AI config snippets
 
 The Operator uses `POST /api/config-draft` with a prompt and context for one device
-(role, image, IOS platform, interfaces and neighbors). The response is a list of
-structured VLAN, access-port, interface-description or IPv4 settings. The Operator
-validates the settings and displays the resulting IOS commands for review.
+(role, image, platform - `iosv`, `iosvl2`, `linux`, `windows`, `routeros` or `vpcs` -,
+interfaces and neighbors). The response is a list of structured settings: VLAN, access-port,
+interface-description or IPv4 for Cisco IOS platforms, IPv4 or host name (`{"kind":"hostname","name":...}`)
+for the other platforms; a kind that does not fit the platform is rejected with 422. The Operator
+validates the settings again and displays the resulting commands for review. An older Operator that
+only sends `iosv`/`iosvl2` keeps working unchanged.
 
 Both `/api/config-draft` and the legacy `/api/config-snippets/generate` endpoint
 require the Operator's `XEONIS_AI_SNIPPETS_TOKEN` as a bearer credential.

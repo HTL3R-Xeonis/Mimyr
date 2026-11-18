@@ -247,3 +247,80 @@ def test_config_draft_uses_token_and_passes_device_context(
     assert '"neighbor": "R1"' in prompt
     if expected == 200:
         assert response.json()[0]["description"] == "To R1"
+
+
+@pytest.mark.parametrize(
+    ("platform", "reply", "expected"),
+    [
+        (
+            "linux",
+            '[{"kind":"ipv4","interface":"ens160","address":"10.0.0.5/24"}]',
+            200,
+        ),
+        ("linux", '[{"kind":"hostname","name":"web-1"}]', 200),
+        (
+            "windows",
+            '[{"kind":"ipv4","interface":"Ethernet0","address":"10.0.0.6/24"}]',
+            200,
+        ),
+        ("routeros", '[{"kind":"hostname","name":"edge1"}]', 200),
+        (
+            "vpcs",
+            '[{"kind":"ipv4","interface":"Ethernet0","address":"10.0.0.8/24"}]',
+            200,
+        ),
+        ("linux", '[{"kind":"vlan","vlan_id":30,"name":"LAB"}]', 422),
+        (
+            "linux",
+            '[{"kind":"description","interface":"ens160","description":"x"}]',
+            422,
+        ),
+        ("iosv", '[{"kind":"hostname","name":"r1"}]', 422),
+        ("iosvl2", '[{"kind":"vlan","vlan_id":30,"name":"LAB"}]', 200),
+    ],
+)
+def test_config_draft_accepts_the_kinds_that_fit_the_platform(
+    api, monkeypatch, platform, reply, expected
+):
+    token = "d" * 32
+    monkeypatch.setenv("XEONIS_AI_SNIPPETS_TOKEN", token)
+    api.CONFIG = {"ollama_servers": [{"name": "a"}]}
+    body = {
+        "prompt": "configure it",
+        "context": {
+            "device": "D1",
+            "role": "VM",
+            "image": "ubuntu",
+            "platform": platform,
+            "ports": ["ens160", "Ethernet0"],
+            "links": [],
+        },
+    }
+    with patch.object(
+        topology_core, "call_ollama_with_failover", return_value=(reply, "a")
+    ):
+        response = TestClient(api.app).post(
+            "/api/config-draft", json=body, headers={"Authorization": f"Bearer {token}"}
+        )
+    assert response.status_code == expected, response.text
+
+
+def test_config_draft_still_refuses_an_unknown_platform(api, monkeypatch):
+    token = "d" * 32
+    monkeypatch.setenv("XEONIS_AI_SNIPPETS_TOKEN", token)
+    api.CONFIG = {"ollama_servers": [{"name": "a"}]}
+    body = {
+        "prompt": "x",
+        "context": {
+            "device": "D1",
+            "role": "VM",
+            "image": "x",
+            "platform": "plan9",
+            "ports": [],
+            "links": [],
+        },
+    }
+    response = TestClient(api.app).post(
+        "/api/config-draft", json=body, headers={"Authorization": f"Bearer {token}"}
+    )
+    assert response.status_code == 422

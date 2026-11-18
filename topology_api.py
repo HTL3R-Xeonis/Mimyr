@@ -269,7 +269,7 @@ class ConfigContext(BaseModel):
     device: str = Field(max_length=200)
     role: str = Field(max_length=100)
     image: str = Field(max_length=300)
-    platform: Literal["iosv", "iosvl2"]
+    platform: Literal["iosv", "iosvl2", "linux", "windows", "routeros", "vpcs"]
     ports: list[ConfigPort] = Field(max_length=100)
     links: list[ConfigLink] = Field(max_length=100)
 
