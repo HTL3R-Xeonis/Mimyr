@@ -654,7 +654,7 @@
    ],
    "passwords": [
     "junioradmin",
-    "REMOVED"
+    "changeme"
    ],
    "hostname": "debian",
    "domain": "xeonis.net",
@@ -740,7 +740,7 @@
    ],
    "passwords": [
     "junioradmin",
-    "REMOVED"
+    "changeme"
    ],
    "hostname": "mint21",
    "domain": null,
@@ -826,7 +826,7 @@
    ],
    "passwords": [
     "junioradmin",
-    "REMOVED"
+    "changeme"
    ],
    "hostname": "rocky9",
    "domain": null,
@@ -857,7 +857,7 @@
    ],
    "passwords": [
     "junioradmin",
-    "REMOVED"
+    "changeme"
    ],
    "hostname": "Ubuntu-Server",
    "domain": null,

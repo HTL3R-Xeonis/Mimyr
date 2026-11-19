@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+from pathlib import Path
 from secrets import compare_digest
 from typing import Annotated, Literal
 
@@ -36,6 +37,17 @@ log = logging.getLogger("topology_api")
 app = FastAPI(title="Topology Generator API", version="2.0")
 
 CONFIG_PATH = os.environ.get("CONFIG_PATH", "/config/topology_config.yml")
+
+
+def _read_version() -> str:
+    """The release version from the VERSION file next to this module ("unknown" if it is not there)."""
+    try:
+        return (Path(__file__).with_name("VERSION")).read_text().strip() or "unknown"
+    except OSError:
+        return "unknown"
+
+
+__version__ = _read_version()
 
 CONFIG: dict | None = None
 CONFIG_ERROR: str | None = None
@@ -91,12 +103,18 @@ def health():
         return JSONResponse(
             {
                 "status": "degraded",
+                "version": __version__,
                 "servers": 0,
                 "problems": [f"config not loaded: {CONFIG_ERROR}"],
             },
             status_code=503,
         )
-    return {"status": "ok", "servers": len(CONFIG["ollama_servers"]), "problems": []}
+    return {
+        "status": "ok",
+        "version": __version__,
+        "servers": len(CONFIG["ollama_servers"]),
+        "problems": [],
+    }
 
 
 @app.get("/api/config")

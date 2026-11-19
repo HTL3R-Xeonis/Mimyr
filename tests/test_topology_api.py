@@ -29,7 +29,12 @@ def test_health_is_ok_with_a_loaded_config_and_does_not_ask_the_llm_servers(api)
     api.CONFIG = {"ollama_servers": [{"name": "a"}, {"name": "b"}], "max_retries": 3}
     response = TestClient(api.app).get("/health")
     assert response.status_code == 200
-    assert response.json() == {"status": "ok", "servers": 2, "problems": []}
+    assert response.json() == {
+        "status": "ok",
+        "version": api.__version__,
+        "servers": 2,
+        "problems": [],
+    }
 
 
 FIX_BODY = {

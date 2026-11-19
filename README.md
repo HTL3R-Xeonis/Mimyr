@@ -98,6 +98,7 @@ the prompts should stay inside the network, *before* them if speed matters more.
 | Endpoint | Purpose |
 |---|---|
 | `GET /` | Service info, whether config loaded successfully |
+| `GET /health` | `200 {"status": "ok", "version": "<release>", ...}` when the config is loaded, `503` (`degraded`) otherwise; the LLM servers are not asked |
 | `GET /api/config` | Currently loaded config (without the full prompt/example text) |
 | `POST /api/reload-config` | Reloads the config files without restarting the container |
 | `POST /api/generate-topology` | Body: `{"prompt": "..."}`. Generates a topology; see response shape below |
@@ -260,10 +261,20 @@ python generate_topology_cli.py \
   --output topology.yml
 ```
 
+## Releases
+
+The release version lives in the one-line file `VERSION` (SemVer, `1.0.0`; `-rc.N` for pre-releases)
+and is shown by `GET /health` (`version`). Pushing a tag `vX.Y.Z` that equals `VERSION` starts
+`.github/workflows/release.yml`: tests and ruff must pass, then a GitHub Release is created with
+`topology-generator-<version>.tar.gz` and `topology-generator-<version>.tar.gz.sha256`
+(release notes are generated). Nothing is released without such a tag; the assets are downloadable
+without a token.
+
 ## Files
 
 - `topology_core.py` - the actual generation/validation/failover logic
 - `topology_api.py` - FastAPI wrapper around it
+- `VERSION` - the release version (see Releases)
 - `config_syntax.py`, `cli_grammar.py` - per-platform syntax checkers and risk warnings for
   `/api/config-draft` (the Docker image copies both)
 - `generate_topology_cli.py` - standalone CLI wrapper around it
@@ -278,3 +289,8 @@ python generate_topology_cli.py \
   disables that one endpoint, see the API section above)
 - `config/summary_prompt_template.txt` - the prompt for `/api/summarize-text` (optional, same
   reasoning as `fix_prompt_template.txt` above)
+
+## License
+
+GNU General Public License v3.0 - see [LICENSE](LICENSE). Third-party components and their licenses are listed in
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

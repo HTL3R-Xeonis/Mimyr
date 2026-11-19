@@ -1,0 +1,40 @@
+name: Python CI (Ruff & Tests)
+
+on:
+  push:
+  pull_request:
+
+# Read-only token; the pipeline needs nothing else.
+permissions:
+  contents: read
+
+env:
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  tests_and_linter:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pytest==9.1.1 httpx==0.28.1 ruff
+
+      - name: Execute tests with pytest
+        run: python -m pytest tests
+
+      - name: Ruff Check
+        run: ruff check --output-format=github .
+
+      - name: Ruff Format
+        run: ruff format --output-format=github --diff --check .
