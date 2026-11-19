@@ -18,6 +18,7 @@ from attachment_inputs import (
     screenshot_dimensions,
 )
 from topology_core import (
+    ConfigDraftError,
     generate_config_draft,
     generate_snippet_settings,
     generate_topology,
@@ -269,7 +270,9 @@ class ConfigContext(BaseModel):
     device: str = Field(max_length=200)
     role: str = Field(max_length=100)
     image: str = Field(max_length=300)
-    platform: Literal["iosv", "iosvl2", "linux", "windows", "routeros", "vpcs"]
+    # Known platforms (iosv, iosvl2, linux, windows, routeros, vpcs) get a real syntax checker,
+    # any other name is accepted and only gets the generic line checks.
+    platform: str = Field(min_length=1, max_length=40, pattern=r"^[A-Za-z0-9_.+-]+$")
     ports: list[ConfigPort] = Field(max_length=100)
     links: list[ConfigLink] = Field(max_length=100)
 
@@ -280,23 +283,32 @@ class ConfigDraftRequest(BaseModel):
     context: ConfigContext
 
 
+class ConfigDraftResponse(BaseModel):
+    commands: list[str]
+    warnings: list[str]
+
+
 @app.post("/api/config-draft")
 def generate_config_draft_endpoint(
     request: ConfigDraftRequest,
     authorization: Annotated[str | None, Header()] = None,
-) -> list[dict]:
+) -> ConfigDraftResponse:
+    """
+    Real device commands for any request, syntax-checked per platform (see
+    topology_core.generate_config_draft and config_syntax). Nothing is executed here.
+    """
     _require_snippet_token(authorization)
     if CONFIG is None:
         raise HTTPException(503, "Generator configuration is unavailable.")
     prompt = request.prompt.strip()
     if not prompt:
         raise HTTPException(422, "Enter a prompt.")
+    context = request.context.model_dump()
+    context["platform"] = context["platform"].lower()
     try:
-        return generate_config_draft(prompt, request.context.model_dump(), CONFIG)
-    except (TypeError, ValueError) as exc:
-        raise HTTPException(
-            422, "The prompt did not yield supported configuration settings."
-        ) from exc
+        return generate_config_draft(prompt, context, CONFIG)
+    except ConfigDraftError as exc:
+        raise HTTPException(422, str(exc)) from exc
     except RuntimeError as exc:
         raise HTTPException(502, "The model service is unavailable.") from exc
 

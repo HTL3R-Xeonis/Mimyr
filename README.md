@@ -157,20 +157,64 @@ retries by calling again. Requires `summary_prompt_template_file` (default
 `summary_prompt_template.txt`); without it the endpoint answers 503 and
 everything else still works.
 
-### AI config snippets
+### AI config drafts: free-form, syntax-checked device commands
 
-The Operator uses `POST /api/config-draft` with a prompt and context for one device
-(role, image, platform - `iosv`, `iosvl2`, `linux`, `windows`, `routeros` or `vpcs` -,
-interfaces and neighbors). The response is a list of structured settings: VLAN, access-port,
-interface-description or IPv4 for Cisco IOS platforms, IPv4 or host name (`{"kind":"hostname","name":...}`)
-for the other platforms; a kind that does not fit the platform is rejected with 422. The Operator
-validates the settings again and displays the resulting commands for review. An older Operator that
-only sends `iosv`/`iosvl2` keeps working unchanged.
+`POST /api/config-draft` (Bearer `XEONIS_AI_SNIPPETS_TOKEN`) turns any request into the real
+commands for one device. There is no fixed list of supported settings; the model writes the
+commands and this service checks their syntax before returning them. Nothing is ever executed
+here.
+
+Request body: `{"prompt": "...", "context": {"device", "role", "image", "platform", "ports", "links"}}`.
+`platform` is a short name such as `iosv`, `iosvl2`, `linux`, `windows`, `routeros` or `vpcs`; any
+other name is accepted and gets only the generic checks. The prompt text and the context are
+passed to the model as data (never as instructions); `prompt` is limited to 1500 characters.
+
+`200` response:
+
+```json
+{"commands": ["interface GigabitEthernet0/1", "description To R1"], "warnings": []}
+```
+
+* `commands`: 1 to 200 single-line strings of 1 to 500 characters (no control characters, no
+  markdown, no explanations), the exact lines to type or run in the given order. Cisco IOS:
+  configuration-mode lines without `configure terminal`, `end` or `write` (the service drops such
+  lines and says so in `warnings`); Linux: shell commands run as root; Windows: PowerShell
+  one-liners; RouterOS: terminal commands; VPCS: its commands. Interfaces are addressed only
+  with names from `context.ports` (or virtual interfaces created by the commands themselves).
+* `warnings`: human-readable notes for dangerous or surprising effects (reload, erase, format,
+  `rm -rf`, anything that can cut the management connection, firewall changes that lock you
+  out). Dangerous commands are not forbidden, only flagged: the model adds notes and a
+  deterministic rule list (`config_syntax.risk_warnings`) adds its own.
+* `422` with a readable `detail`: the model says the request makes no sense for the device, or
+  the commands still fail the syntax check after one automatic repair (the checker's error list
+  is fed back to the model once). `403` wrong token, `502` model service down, `503` no config.
+
+Syntax checkers (`config_syntax.py`, `cli_grammar.py`), run on every line. The grammars are not
+whitelists: known commands are checked in detail, everything else passes the generic format
+check (one printable line of at most 500 characters, sensible words, balanced quotes and
+brackets, no prompt prefix, no markdown fence; for RouterOS also a path or `:` command shape) and
+is reported once per request as a non-blocking warning (`syntax not verified for '<command>'`,
+or one combined warning listing the first few commands when there are many):
+
+| Platform | Checker | Notes |
+|---|---|---|
+| `iosv`, `iosvl2` | own IOS grammar with mode tracking (global, interface, line, router, vlan, DHCP pool, named ACL) | No maintained library checks IOS command syntax: ciscoconfparse2 only parses the indentation structure and never rejects a command. Known commands are checked in detail (invalid arguments and a known command in the wrong mode are rejected); everything else passes the generic format check (starts with a letter or `no`/`do`, balanced quotes and brackets, no `?`, no unfilled `<placeholder>`) with a warning. The bodies of rare sub-modes (route-map, class-map, crypto, ...) and the arguments of `no ...` are not verified, and ambiguous keyword abbreviations that IOS refuses are accepted. EXEC commands (`show`, `reload`, ...) are only allowed behind `do`. |
+| `linux` | `bash -n` (real bash parser, parse only) plus checks for a trailing backslash, here-documents, interactive programs (`nano`, `less`, ...), `ip` object names and interface names | The line is passed to bash on stdin and is never run. |
+| `windows` | [tree-sitter-pwsh](https://pypi.org/project/tree-sitter-pwsh/) (PowerShell grammar) plus the approved-verb rule for Verb-Noun cmdlets (`Configure-Thing` is rejected) | Without the package only a bracket/quote balance check runs and a warning says so. Native commands (`netsh`, `ipconfig`) pass as PowerShell command calls; cmd-only syntax is rejected. |
+| `routeros` | own tokenizer/grammar (no library exists) | Quotes and brackets must balance and a line starts with an absolute menu path (`/ip address add ...`) or a `:` command. Known menu and command pairs are checked in detail: arguments are `key=value`; `address`, `dst-address`, `vlan-id`, `disabled` and interface references are verified. Unknown menus, commands, `:` commands and properties pass the generic format check with a warning. |
+| `vpcs` | own small grammar | About 25 VPCS commands are checked in detail (invalid arguments are rejected); any other well-formed command passes the generic format check with a warning. |
+| anything else | generic checks only | One printable line, 1-500 characters, no markdown fence, no prompt prefix; a warning says no syntax check exists for the platform. |
+
+The checks do not prove that a command does what was asked, only that it is well-formed for
+the platform. Review the commands (the Operator shows them before sending).
 
 Both `/api/config-draft` and the legacy `/api/config-snippets/generate` endpoint
 require the Operator's `XEONIS_AI_SNIPPETS_TOKEN` as a bearer credential.
 `XEONIS_CLASSROOM_MODE=1` disables the older general-purpose `/api/suggest-fix`
 endpoint on this instance.
+
+Run the tests with `python -m pytest tests` (no network; the Linux and Windows checker tests need
+`bash` and `tree-sitter-pwsh` from `requirements.txt` and are skipped without them).
 
 ### Generation from files
 
@@ -214,10 +258,13 @@ python generate_topology_cli.py \
 
 - `topology_core.py` - the actual generation/validation/failover logic
 - `topology_api.py` - FastAPI wrapper around it
+- `config_syntax.py`, `cli_grammar.py` - per-platform syntax checkers and risk warnings for
+  `/api/config-draft` (the Docker image copies both)
 - `generate_topology_cli.py` - standalone CLI wrapper around it
 - `tests/test_topology_core.py` - validation, auto-repair and retry-feedback tests
   (`python -m pytest tests`; pytest is not in `requirements.txt`, and the
-  Docker image ships the runtime modules)
+  Docker image ships the runtime modules); `tests/test_config_syntax.py` and
+  `tests/test_config_draft.py` cover the config-draft checkers and endpoint
 - `config/topology_config.yml` - server URLs, Ollama server list, timeouts
 - `config/prompt_template.txt` - the prompt sent to the LLM
 - `config/example_topology.yml` - the example format shown to the LLM
