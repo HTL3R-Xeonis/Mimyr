@@ -1,4 +1,5 @@
 services:
+  # Mimyr (formerly TopologyGenerator). The service and container name stay topology-generator on purpose.
   topology-generator:
     build:
       context: .

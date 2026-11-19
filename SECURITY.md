@@ -1,4 +1,4 @@
-# Security policy
+# Security policy - Mimyr (formerly TopologyGenerator)
 
 ## Reporting a vulnerability
 

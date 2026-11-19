@@ -1,4 +1,4 @@
-# Third-party notices
+# Third-party notices - Mimyr (formerly TopologyGenerator)
 
 This project is licensed under the GNU GPL v3 (see `LICENSE`). No third-party source code is copied into the repository.
 Licenses were read from the installed packages (`pip-licenses`, November 2026) and the Docker base images.

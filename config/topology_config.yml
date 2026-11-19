@@ -1,4 +1,4 @@
-# Config for the Topology Generator.
+# Config for Mimyr (formerly TopologyGenerator), the topology generator.
 # After making changes: restart the container, or call
 # POST /api/reload-config if the API is already running.
 

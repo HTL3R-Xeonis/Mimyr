@@ -1,4 +1,10 @@
-# Topology Generator
+# Mimyr (formerly TopologyGenerator)
+
+**Mimyr is the topology and config-draft service (the "generator") of [Ginnungagap](https://github.com/HTL3R-Xeonis/Ginnungagap-Appliance).**
+"Ginnungagap" is the name of the whole product; Mimyr is the code name of this component. The repository used to be called
+TopologyGenerator (local checkout folder `topology-generator`); the container name `topology-generator`, the API paths and the
+config keys keep their names on purpose. It is used by [Igdrasyl (formerly TopologyOperator)](https://github.com/HTL3R-Xeonis/Igdrasyl)
+and [Mjonyr (formerly TopologyBuilder)](https://github.com/HTL3R-Xeonis/Mjonyr).
 
 Turns a natural-language prompt into a GNS3 topology config YAML, using an
 Ollama LLM or a hosted one with a free tier (Gemini, Groq, OpenRouter, ... - any
@@ -6,7 +12,7 @@ OpenAI-compatible API). Given a request like "two PCs behind a switch", it queri
 GNS3 and NFS template catalogs for available device images, builds a prompt
 around them, and asks an LLM to produce a topology file in the project's
 `nodes`/`edges` format - the same format
-[TopologyBuilder](https://github.com/HTL3R-Xeonis/TopologyBuilder) deploys
+[Mjonyr (formerly TopologyBuilder)](https://github.com/HTL3R-Xeonis/Mjonyr) deploys
 from.
 
 ## How it works
@@ -20,7 +26,7 @@ from.
    (Ollama or an OpenAI-compatible hosted one), failing over to the next if a
    server is unreachable, out of quota or has no API key.
 4. Validates the LLM's YAML output - the same things
-   [TopologyBuilder](https://github.com/HTL3R-Xeonis/TopologyBuilder) would
+   [Mjonyr](https://github.com/HTL3R-Xeonis/Mjonyr) would
    reject later, so a topology reported as `valid` really deploys: valid YAML,
    every node has `image`, `role` and `names`, `role` is one of `PC`, `VM`,
    `ROUTER`, `SWITCH`, `FW`, `names` are text and used only once, every
@@ -102,8 +108,8 @@ the prompts should stay inside the network, *before* them if speed matters more.
 | `GET /api/config` | Currently loaded config (without the full prompt/example text) |
 | `POST /api/reload-config` | Reloads the config files without restarting the container |
 | `POST /api/generate-topology` | Body: `{"prompt": "..."}`. Generates a topology; see response shape below |
-| `POST /api/suggest-fix` | Body: `{"device_role", "device_image", "context", "goal"}`. One device-config suggestion for a failed health check (called by TopologyOperator's `app/fix_jobs.py`); see response shape below |
-| `POST /api/summarize-text` | Body: `{"text", "goal"}`. One best-effort plain-text summary of arbitrary text (called by TopologyOperator's admin panel to summarize its own log, `app/log_summary.py`); see response shape below |
+| `POST /api/suggest-fix` | Body: `{"device_role", "device_image", "context", "goal"}`. One device-config suggestion for a failed health check (called by Igdrasyl's `app/fix_jobs.py`); see response shape below |
+| `POST /api/summarize-text` | Body: `{"text", "goal"}`. One best-effort plain-text summary of arbitrary text (called by Igdrasyl's admin panel to summarize its own log, `app/log_summary.py`); see response shape below |
 
 `POST /api/generate-topology` response:
 
@@ -266,7 +272,7 @@ python generate_topology_cli.py \
 The release version lives in the one-line file `VERSION` (SemVer, `1.0.0`; `-rc.N` for pre-releases)
 and is shown by `GET /health` (`version`). Pushing a tag `vX.Y.Z` that equals `VERSION` starts
 `.github/workflows/release.yml`: tests and ruff must pass, then a GitHub Release is created with
-`topology-generator-<version>.tar.gz` and `topology-generator-<version>.tar.gz.sha256`
+`Mimyr-<version>.tar.gz` and `Mimyr-<version>.tar.gz.sha256`
 (release notes are generated). Nothing is released without such a tag; the assets are downloadable
 without a token.
 
