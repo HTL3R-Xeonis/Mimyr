@@ -164,7 +164,7 @@ commands for one device. There is no fixed list of supported settings; the model
 commands and this service checks their syntax before returning them. Nothing is ever executed
 here.
 
-Request body: `{"prompt": "...", "context": {"device", "role", "image", "platform", "ports", "links"}}`.
+Request body: `{"prompt": "...", "context": {"device", "role", "image", "platform", "ports", "links", optional "interface_aliases"}}`.
 `platform` is a short name such as `iosv`, `iosvl2`, `linux`, `windows`, `routeros` or `vpcs`; any
 other name is accepted and gets only the generic checks. The prompt text and the context are
 passed to the model as data (never as instructions); `prompt` is limited to 1500 characters.
@@ -181,6 +181,12 @@ passed to the model as data (never as instructions); `prompt` is limited to 1500
   lines and says so in `warnings`); Linux: shell commands run as root; Windows: PowerShell
   one-liners; RouterOS: terminal commands; VPCS: its commands. Interfaces are addressed only
   with names from `context.ports` (or virtual interfaces created by the commands themselves).
+  The optional `context.interface_aliases` (object, at most 100 entries, keys and values 1-64
+  characters) maps real interface names to the names the user may have written in the request
+  (for example `{"ens160": "eth0"}`); it is given to the model as data so it can translate an
+  alias into the real name. Aliases are never valid interface names in commands: the checker
+  compares only against `context.ports`, so a command using an alias is rejected and goes
+  through the automatic repair attempt.
 * `warnings`: human-readable notes for dangerous or surprising effects (reload, erase, format,
   `rm -rf`, anything that can cut the management connection, firewall changes that lock you
   out). Dangerous commands are not forbidden, only flagged: the model adds notes and a

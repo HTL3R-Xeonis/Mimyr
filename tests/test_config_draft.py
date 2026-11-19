@@ -300,3 +300,59 @@ def test_oversized_model_answers_are_not_parsed(api):
     response, model = post(api, body("linux", ports=["ens160"]), [huge, huge])
     assert response.status_code == 422
     assert model.call_count == 2
+
+
+def alias_body(aliases="default"):
+    payload = body("linux", "put 10.0.0.5/24 on eth0", ports=["ens160", "ens192"])
+    if aliases == "default":
+        aliases = {"ens160": "eth0", "ens192": "eth1"}
+    if aliases is not None:
+        payload["context"]["interface_aliases"] = aliases
+    return payload
+
+
+def test_interface_aliases_are_given_to_the_model_as_data(api):
+    response, model = post(
+        api, alias_body(), [reply(["ip addr add 10.0.0.5/24 dev ens160"])]
+    )
+    assert response.status_code == 200
+    prompt = model.call_args.args[0]
+    assert '"interface_aliases": {"ens160": "eth0", "ens192": "eth1"}' in prompt
+    assert "maps the real interface names" in prompt
+    assert "if the request mentions an alias, use the real name" in prompt
+
+
+def test_the_context_is_unchanged_without_aliases(api):
+    _, model = post(
+        api, alias_body(None), [reply(["ip addr add 10.0.0.5/24 dev ens160"])]
+    )
+    assert "interface_aliases" not in model.call_args.args[0].split("DATA")[-1]
+
+
+def test_an_alias_is_not_a_valid_interface_name_and_triggers_the_repair(api):
+    bad = reply(["ip addr add 10.0.0.5/24 dev eth0"])
+    good = reply(["ip addr add 10.0.0.5/24 dev ens160"])
+    response, model = post(api, alias_body(), [bad, good])
+    assert response.status_code == 200
+    assert response.json()["commands"] == ["ip addr add 10.0.0.5/24 dev ens160"]
+    assert model.call_count == 2
+    assert "interface 'eth0' is not one of the device ports" in model.call_args.args[0]
+    assert post(api, alias_body(), [bad, bad])[0].status_code == 422
+
+
+@pytest.mark.parametrize(
+    "aliases",
+    [
+        {"": "eth0"},
+        {"ens160": ""},
+        {"x" * 65: "eth0"},
+        {"ens160": "y" * 65},
+        {f"if{i}": f"eth{i}" for i in range(101)},
+        ["ens160"],
+        {"ens160": 5},
+    ],
+)
+def test_invalid_interface_aliases_are_refused(api, aliases):
+    response, model = post(api, alias_body(aliases), [reply(["hostname x"])])
+    assert response.status_code == 422
+    model.assert_not_called()

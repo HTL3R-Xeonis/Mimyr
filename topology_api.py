@@ -263,6 +263,7 @@ class ConfigLink(BaseModel):
 
 
 ConfigPort = Annotated[str, Field(max_length=200)]
+AliasName = Annotated[str, Field(min_length=1, max_length=64)]
 
 
 class ConfigContext(BaseModel):
@@ -275,6 +276,11 @@ class ConfigContext(BaseModel):
     platform: str = Field(min_length=1, max_length=40, pattern=r"^[A-Za-z0-9_.+-]+$")
     ports: list[ConfigPort] = Field(max_length=100)
     links: list[ConfigLink] = Field(max_length=100)
+    # Optional: real interface name -> name the user may have used in the request. Only prompt data;
+    # the syntax check still accepts only context.ports.
+    interface_aliases: dict[AliasName, AliasName] | None = Field(
+        default=None, max_length=100
+    )
 
 
 class ConfigDraftRequest(BaseModel):
@@ -305,6 +311,8 @@ def generate_config_draft_endpoint(
         raise HTTPException(422, "Enter a prompt.")
     context = request.context.model_dump()
     context["platform"] = context["platform"].lower()
+    if context.get("interface_aliases") is None:
+        context.pop("interface_aliases", None)
     try:
         return generate_config_draft(prompt, context, CONFIG)
     except ConfigDraftError as exc:
