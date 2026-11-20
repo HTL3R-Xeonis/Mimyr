@@ -1,17 +1,41 @@
 version: 2
 updates:
+  # pip: one PR per week for all patch/minor updates; major updates get their own PR each.
   - package-ecosystem: "pip"
     directory: "/"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 5
+    groups:
+      pip-minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
   - package-ecosystem: "docker"
     directory: "/"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 5
+    # Python base-image bumps (3.12-slim -> 3.15-slim) are ignored for now: every service image and the
+    # appliance base change with it, so that is done deliberately with an image rebuild + acceptance.
+    # Dependabot reads 3.12 -> 3.15 as a minor update, so major AND minor are ignored.
+    ignore:
+      - dependency-name: "python"
+        update-types:
+          - "version-update:semver-major"
+          - "version-update:semver-minor"
+    groups:
+      docker-minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
+  # GitHub Actions: all updates in one weekly PR.
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 5
+    groups:
+      github-actions:
+        patterns:
+          - "*"
