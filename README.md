@@ -2,9 +2,9 @@
 
 **Mimyr is the topology and config-draft service (the "generator") of [Ginnungagap](https://github.com/HTL3R-Xeonis/Ginnungagap-Appliance).**
 "Ginnungagap" is the name of the whole product; Mimyr is the code name of this component. The repository used to be called
-TopologyGenerator (local checkout folder `topology-generator`); the container name `topology-generator`, the API paths and the
+TopologyGenerator (its old local checkout folder was `topology-generator`, now `Mimyr`); the container name `topology-generator`, the API paths and the
 config keys keep their names on purpose. It is used by [Igdrasyl (formerly TopologyOperator)](https://github.com/HTL3R-Xeonis/Igdrasyl)
-and [Mjonyr (formerly TopologyBuilder)](https://github.com/HTL3R-Xeonis/Mjonyr).
+and [Mjonyr (formerly TopologyBuilder)](https://github.com/HTL3R-Xeonis/TopologyBuilder).
 
 Turns a natural-language prompt into a GNS3 topology config YAML, using an
 Ollama LLM or a hosted one with a free tier (Gemini, Groq, OpenRouter, ... - any
@@ -12,7 +12,7 @@ OpenAI-compatible API). Given a request like "two PCs behind a switch", it queri
 GNS3 and NFS template catalogs for available device images, builds a prompt
 around them, and asks an LLM to produce a topology file in the project's
 `nodes`/`edges` format - the same format
-[Mjonyr (formerly TopologyBuilder)](https://github.com/HTL3R-Xeonis/Mjonyr) deploys
+[Mjonyr (formerly TopologyBuilder)](https://github.com/HTL3R-Xeonis/TopologyBuilder) deploys
 from.
 
 ## How it works
@@ -26,7 +26,7 @@ from.
    (Ollama or an OpenAI-compatible hosted one), failing over to the next if a
    server is unreachable, out of quota or has no API key.
 4. Validates the LLM's YAML output - the same things
-   [Mjonyr](https://github.com/HTL3R-Xeonis/Mjonyr) would
+   [Mjonyr](https://github.com/HTL3R-Xeonis/TopologyBuilder) would
    reject later, so a topology reported as `valid` really deploys: valid YAML,
    every node has `image`, `role` and `names`, `role` is one of `PC`, `VM`,
    `ROUTER`, `SWITCH`, `FW`, `names` are text and used only once, every
