@@ -67,6 +67,16 @@ Rules (follow strictly):
    interface>]. Never connect it to more than one device, never add it
    when internet access was not requested.
 
+9. The whole topology MUST be ONE connected network: starting at any
+   device you must be able to reach EVERY other device by following the
+   edges. No device may stand alone without an edge, and there must be no
+   separate islands (for example a switch with its PCs that is not linked
+   to the rest). Every PC or VM connects to a switch or router that is
+   itself part of the main network. Before finishing, pick any device and
+   follow the edges to check that you reach all of them - if some are not
+   reachable, add the missing edge (with new, unused interfaces on both
+   devices) that joins that group to the rest.
+
 User's request:
 {user_request}
 

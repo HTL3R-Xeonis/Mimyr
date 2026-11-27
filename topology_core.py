@@ -723,7 +723,66 @@ def validate_topology(
         _check_interface_unused(str(device_a), str(interface_a))
         _check_interface_unused(str(device_b), str(interface_b))
 
+    separate_parts = _unconnected_parts(node_names, parsed.get("edges") or [])
+    if separate_parts:
+        warnings.append(_not_connected_warning(separate_parts))
+
     return parsed, warnings, corrected
+
+
+def _unconnected_parts(node_names: set[str], edges: list) -> list[list[str]]:
+    """
+    The groups of devices that no edge joins to each other - empty when every device can reach every other one (or
+    there is nothing to join). A device without any edge counts as a group of its own. Edges that are malformed or
+    name an unknown device are reported elsewhere and ignored here.
+    """
+    if len(node_names) < 2:
+        return []
+    parent = {name: name for name in node_names}
+
+    def find(name: str) -> str:
+        while parent[name] != name:
+            parent[name] = parent[parent[name]]
+            name = parent[name]
+        return name
+
+    for edge in edges:
+        if (
+            isinstance(edge, list)
+            and len(edge) == 4
+            and edge[0] in parent
+            and edge[2] in parent
+        ):
+            parent[find(edge[0])] = find(edge[2])
+
+    groups: dict[str, list[str]] = {}
+    for name in sorted(node_names):
+        groups.setdefault(find(name), []).append(name)
+    if len(groups) < 2:
+        return []
+    # the biggest group first: it is "the network", the others are what has to be attached to it
+    return sorted(groups.values(), key=lambda g: (-len(g), g[0]))
+
+
+MAX_PARTS_SHOWN = 5
+MAX_NAMES_PER_PART = 8
+
+
+def _not_connected_warning(parts: list[list[str]]) -> str:
+    def describe(group: list[str]) -> str:
+        shown = ", ".join(group[:MAX_NAMES_PER_PART])
+        more = len(group) - MAX_NAMES_PER_PART
+        return f"[{shown}{f', ... and {more} more' if more > 0 else ''}]"
+
+    listed = "; ".join(describe(g) for g in parts[:MAX_PARTS_SHOWN])
+    if len(parts) > MAX_PARTS_SHOWN:
+        listed += f"; ... and {len(parts) - MAX_PARTS_SHOWN} more"
+    return (
+        f"The topology is not connected: its devices form {len(parts)} separate parts that no edge links together: "
+        f"{listed}. All devices must belong to ONE network - add an edge from each smaller part to a device of the "
+        f"largest part (for example attach its switch to a router or to the core switch), using a new, unused "
+        f"interface on both devices."
+    )
 
 
 # ---------- Retry feedback ----------

@@ -558,3 +558,114 @@ def test_summarize_text_propagates_a_total_failover_failure():
         pytest.raises(RuntimeError, match="all down"),
     ):
         tc.summarize_text("text", "goal", _summary_config())
+
+
+# ---------- the topology must be one connected network ----------
+
+ISLANDS = """nodes:
+  - {image: VPCS, role: PC, names: [PC1, PC2, PC3, PC4]}
+  - {image: Ethernet switch, role: SWITCH, names: [SW1, SW2]}
+edges:
+  - [PC1, eth0, SW1, gi0/0]
+  - [PC2, eth0, SW1, gi0/1]
+  - [PC3, eth0, SW2, gi0/0]
+  - [PC4, eth0, SW2, gi0/1]
+"""
+
+
+def test_a_connected_topology_has_no_connectivity_warning():
+    text = ISLANDS + "  - [SW1, gi0/2, SW2, gi0/2]\n"
+    _, warnings, _, _ = _validate(text)
+
+    assert warnings == []
+
+
+def test_separate_islands_are_reported_with_their_devices():
+    _, warnings, _, _ = _validate(ISLANDS)
+
+    assert len(warnings) == 1
+    assert "not connected" in warnings[0]
+    assert "2 separate parts" in warnings[0]
+    assert "[PC1, PC2, SW1]" in warnings[0] and "[PC3, PC4, SW2]" in warnings[0]
+
+
+def test_the_biggest_part_is_listed_first_as_the_network_to_attach_to():
+    text = (
+        "nodes:\n  - {image: VPCS, role: PC, names: [A, B, C, D]}\n"
+        "  - {image: Ethernet switch, role: SWITCH, names: [S1]}\n"
+        "edges:\n  - [A, e0, S1, g0]\n  - [B, e0, S1, g1]\n  - [C, e0, S1, g2]\n"
+    )
+    _, warnings, _, _ = _validate(text)
+
+    assert "[A, B, C, S1]; [D]" in warnings[0]
+
+
+def test_a_device_without_any_edge_is_a_part_of_its_own():
+    text = (
+        "nodes:\n  - {image: VPCS, role: PC, names: [A, B, LONELY]}\n"
+        "edges:\n  - [A, e0, B, e0]\n"
+    )
+    _, warnings, _, _ = _validate(text)
+
+    assert any("[A, B]; [LONELY]" in w for w in warnings)
+
+
+def test_several_devices_without_edges_are_not_a_connected_topology():
+    text = "nodes:\n  - {image: VPCS, role: PC, names: [A, B]}\nedges: []\n"
+    _, warnings, _, _ = _validate(text)
+
+    assert any("not connected" in w for w in warnings)
+
+
+def test_a_single_device_needs_no_edge():
+    text = "nodes:\n  - {image: VPCS, role: PC, names: [ONLY]}\nedges: []\n"
+    _, warnings, _, _ = _validate(text)
+
+    assert warnings == []
+
+
+def test_an_edge_to_an_unknown_device_does_not_join_two_parts():
+    text = (
+        "nodes:\n  - {image: VPCS, role: PC, names: [A, B]}\n"
+        "edges:\n  - [A, e0, GHOST, e0]\n  - [GHOST, e1, B, e0]\n"
+    )
+    _, warnings, _, _ = _validate(text)
+
+    # the unknown device is reported, and it does not count as a bridge between A and B
+    assert any("unknown device: 'GHOST'" in w for w in warnings)
+    assert any("not connected" in w for w in warnings)
+
+
+def test_the_warning_stays_short_for_many_parts_and_long_parts():
+    names = [f"PC{i}" for i in range(30)]
+    text = (
+        "nodes:\n  - {image: VPCS, role: PC, names: ["
+        + ", ".join(names)
+        + "]}\nedges: []\n"
+    )
+    _, warnings, _, _ = _validate(text)
+
+    message = next(w for w in warnings if "not connected" in w)
+    assert "30 separate parts" in message
+    assert "... and 25 more" in message
+    assert len(message) < 700
+
+
+def test_the_retry_prompt_tells_the_model_which_parts_to_join():
+    _, warnings, _, _ = _validate(ISLANDS)
+    retry = tc.build_retry_prompt("base prompt", ISLANDS, warnings)
+
+    assert "not connected" in retry and "[PC3, PC4, SW2]" in retry
+    assert "add an edge from each smaller part" in retry
+
+
+def test_the_prompt_template_demands_one_connected_network():
+    from pathlib import Path
+
+    template = (
+        Path(__file__).resolve().parent.parent / "config" / "prompt_template.txt"
+    ).read_text(encoding="utf-8")
+
+    flat = " ".join(template.split())  # the template wraps its lines
+    assert "ONE connected network" in flat
+    assert "no separate islands" in flat

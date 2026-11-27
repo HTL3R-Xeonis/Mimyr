@@ -32,8 +32,11 @@ from.
    `ROUTER`, `SWITCH`, `FW`, `names` are text and used only once, every
    `image` exists in the matching catalog (GNS3 templates for non-VM roles,
    NFS images for `role: VM`), every edge is four text values referencing
-   defined devices, connects two *different* devices, and no device uses an
-   interface name in more than one edge.
+   defined devices, connects two *different* devices, no device uses an
+   interface name in more than one edge, and **the topology is one connected
+   network** (every device can reach every other one through the edges; a
+   device or a group of devices that no edge links to the rest is reported
+   with the names of the separate parts, so the retry can join them).
 5. Repairs what has exactly one sensible fix instead of spending another
    (minutes-long) LLM call on it: a role on a VM-list image becomes `VM`, and
    an interface name a device reuses is renumbered to the next free one of
